@@ -153,7 +153,31 @@ class Specimen:
         cumulative_movements = movements.sum(dim=1)
         neurons[:, Data.POSITION.value].add_(cumulative_movements)
 
+    def _handle_connections(self, neurons: Tensor, indices: Tensor, distances: Tensor):
+        in_range = distances <= self.genome.connection_range
+        in_range_indices = torch.nonzero(in_range, as_tuple=False)
+        sender_indices = in_range_indices[:, 0]
+        receiver_indices = in_range_indices[:, 1]
 
+        sender_states = neurons[sender_indices, Data.STATE.value]
+        receiver_states = neurons[receiver_indices, Data.STATE.value]
+        connection_strengths = F.sigmoid(
+            self.genome.connectivity_coefficient(torch.cat([sender_states, receiver_states], dim=1))
+        )
+        scoring_grid = torch.zeros_like(distances)
+        scoring_grid[in_range_indices] = connection_strengths
+        receptivity_scores = scoring_grid.sum(dim=0)
+        emissivity_scores = scoring_grid.sum(dim=1)
+        connectivity_grid = torch.full_like(distances, fill_value=float('-inf'))
+        connectivity_grid[in_range_indices] = connection_strengths
+        transmission_factors = connectivity_grid.softmax(dim=1)
+
+        sorted_strength_index_grid = connection_strength_grid.argsort(dim=1, descending=True)[:, :MAX_CONNECTIONS]
+        sorted_strength_grid = torch.gather(connection_strength_grid, dim=1, index=sorted_strength_index_grid)
+        inverse_connection_
+
+        neurons[:, Data.OUTPUT_INDICES.value] = indices[sorted_strength_index_grid]
+        neurons[:, Data.OUTPUT_CONNECTIVITY.value] = sorted_strength_grid
 
     def add_neurons(self, positions: Tensor, latent_states: Tensor, set_parameters: bool = True) -> Tensor:
         """
