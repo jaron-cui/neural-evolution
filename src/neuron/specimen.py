@@ -45,10 +45,17 @@ class Specimen:
         previous_neurons = self.neurons[indices]
         updated_neurons = previous_neurons.clone()
 
+        positions = previous_neurons[: Data.POSITION.value]
+        diffs = positions[:, None, :] - positions[None, :, :]  # shape: (n, n, 3)
+        distances = torch.norm(diffs, dim=-1)  # shape: (n, n)
+        directions = diffs / distances
+
+        # update neuron positions
+        self._handle_physics(updated_neurons, diffs, directions)
         # handle hormone emission, absorption, and decay
-        self._handle_hormones(previous_neurons, updated_neurons)
+        self._handle_hormones(previous_neurons, updated_neurons, distances)
         # handle firing and passive neuron state updates
-        self._handle_state_transform_updates(previous_neurons, updated_neurons, indices)
+        self._handle_state_transform_updates(previous_neurons, updated_neurons, indices, distances)
         # handle cell death and division
         updated_neurons, indices = self._handle_life_and_death(updated_neurons, indices)
 
@@ -57,13 +64,35 @@ class Specimen:
         distances = torch.norm(diffs, dim=-1)
         directions = diffs / distances
         # update neuron positions
-        self._handle_physics(updated_neurons, diffs, directions)
         # update connectivity
         self._handle_connections(updated_neurons, indices)
         # update direct parameters
         # update derived parameters
 
-    def _handle_state_transform_updates(self, previous_neurons: Tensor, updated_neurons: Tensor, indices: Tensor):
+    def _handle_state_transform_updates(
+        self, previous_neurons: Tensor, updated_neurons: Tensor, indices: Tensor, distances: Tensor
+    ):
+        in_range = distances <= self.genome.connection_range
+        in_range_indices = torch.nonzero(in_range, as_tuple=False)
+        sender_indices = in_range_indices[:, 0]
+        receiver_indices = in_range_indices[:, 1]
+
+        sender_states = previous_neurons[sender_indices, Data.STATE.value]
+        receiver_states = previous_neurons[receiver_indices, Data.STATE.value]
+        connection_strengths = F.sigmoid(
+            self.genome.connectivity_coefficient(torch.cat([sender_states, receiver_states], dim=1))
+        )
+        scoring_grid = torch.zeros_like(distances)
+        scoring_grid[in_range_indices] = connection_strengths
+        receptivity_scores = scoring_grid.sum(dim=0)
+        emissivity_scores = scoring_grid.sum(dim=1)
+        updated_neurons[:, Data.TOTAL_RECEPTIVITY.value] = receptivity_scores
+        updated_neurons[:, Data.TOTAL_EMISSIVITY.value] = emissivity_scores
+
+        connectivity_grid = torch.full_like(distances, fill_value=float('-inf'))
+        connectivity_grid[in_range_indices] = connection_strengths
+        connectivity = connectivity_grid.softmax(dim=1)  # (n, n)
+
         # locate neurons that are ready to fire signals - ion threshold reached and firing warmup completed
         activation_threshold_reached = (
             previous_neurons[:, Data.ACTIVATION_PROGRESS.value]
@@ -91,22 +120,19 @@ class Specimen:
         updated_neurons[~activated, Data.LATENT_STATE.value].copy_(passive_state_update[:, Data.TRANSFORM_LATENT.value])
 
         # send signals to destination neurons
-        signal_destinations = previous_neurons[activated, Data.OUTPUT_INDICES.value].reshape(-1)
-        signal_connectivity = previous_neurons[activated, Data.OUTPUT_CONNECTIVITY.value]
-        signal_strengths = (signal_connectivity * previous_neurons[activated, Data.SIGNAL_STRENGTH.value]).reshape(-1)
+        signals = (connectivity * previous_neurons[activated, Data.SIGNAL_STRENGTH.value]).reshape(-1)
+        # signal_destinations = previous_neurons[activated, Data.OUTPUT_INDICES.value].reshape(-1)
+        # signal_connectivity = previous_neurons[activated, Data.OUTPUT_CONNECTIVITY.value]
+        # signal_strengths = (signal_connectivity * previous_neurons[activated, Data.SIGNAL_STRENGTH.value]).reshape(-1)
 
-        cumulative_signals = torch.zeros_like(self.neurons[:, Data.ACTIVATION_PROGRESS.value])
-        cumulative_signals.scatter_add_(0, signal_destinations, signal_strengths)
+        # cumulative_signals = torch.zeros_like(self.neurons[:, Data.ACTIVATION_PROGRESS.value])
+        # cumulative_signals.scatter_add_(0, signal_destinations, signal_strengths)
+        cumulative_signals = signals.sum(dim=0)
         updated_neurons[:, Data.ACTIVATION_PROGRESS.value].add_(cumulative_signals[indices])
 
-    def _handle_hormones(self, previous_neurons: Tensor, updated_neurons: Tensor):
+    def _handle_hormones(self, previous_neurons: Tensor, updated_neurons: Tensor, distances: Tensor):
         # decay hormones
         updated_neurons[:, Data.HORMONE_INFLUENCE.value].mul_(self.genome.hormone_decay)
-
-        positions = previous_neurons[: Data.POSITION.value]
-        # Compute squared distances
-        diffs = positions[:, None, :] - positions[None, :, :]  # shape: (n, n, 3)
-        distances = torch.norm(diffs, dim=-1)  # shape: (n, n)
 
         # absorb hormones
         # smooth falloff function: strength = max(log10(10 - distance * 9/range), 0)
