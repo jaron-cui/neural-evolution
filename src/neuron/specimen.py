@@ -42,19 +42,17 @@ class Specimen:
         updated_neurons = previous_neurons.clone()
 
         # handle firing and passive neuron state updates
-        self._step_activations(previous_neurons, updated_neurons, indices)
-
-        # decay hormones
-        updated_neurons[:, Data.HORMONE_INFLUENCE.value].mul_(self.genome.hormone_decay)
-
-        # absorb hormones
+        self._handle_state_transform_updates(previous_neurons, updated_neurons, indices)
+        # handle hormone emission, absorption, and decay
+        self._handle_hormones(previous_neurons, updated_neurons)
         # handle cell death
         # handle cell division
+        # update neuron positions
         # update connectivity
         # update direct parameters
         # update derived parameters
 
-    def _step_activations(self, previous_neurons: Tensor, updated_neurons: Tensor, indices):
+    def _handle_state_transform_updates(self, previous_neurons: Tensor, updated_neurons: Tensor, indices):
         # locate neurons that are ready to fire signals - ion threshold reached and firing warmup completed
         activation_threshold_reached = (
             previous_neurons[:, Data.ACTIVATION_PROGRESS.value]
@@ -89,6 +87,25 @@ class Specimen:
         cumulative_signals = torch.zeros_like(self.neurons[:, Data.ACTIVATION_PROGRESS.value])
         cumulative_signals.scatter_add_(0, signal_destinations, signal_strengths)
         updated_neurons[:, Data.ACTIVATION_PROGRESS.value].add_(cumulative_signals[indices])
+
+    def _handle_hormones(self, previous_neurons: Tensor, updated_neurons: Tensor):
+        # decay hormones
+        updated_neurons[:, Data.HORMONE_INFLUENCE.value].mul_(self.genome.hormone_decay)
+
+        positions = previous_neurons[: Data.POSITION.value]
+        # Compute squared distances
+        diffs = positions[:, None, :] - positions[None, :, :]  # shape: (n, n, 3)
+        distances = torch.norm(diffs, dim=-1)  # shape: (n, n)
+
+        # absorb hormones
+        # smooth falloff function: strength = max(log10(10 - distance * 9/range), 0)
+        hormone_strengths = torch.log10(
+            10 - distances * (9 / previous_neurons[:, Data.HORMONE_RANGE.value])).relu_()  # (n, n)
+        # scaled_hormones = hormone_strengths * previous_neurons[:, None, Data.HORMONE_EMISSION.value]  # (n, n, h)
+        # hormone_absorption = scaled_hormones.sum(dim=0)
+        hormones = previous_neurons[:, None, Data.HORMONE_EMISSION.value]
+        hormone_absorption = torch.einsum("ij,ik->jk", hormone_strengths, hormones)  # (n, 10)
+        updated_neurons[:, Data.HORMONE_INFLUENCE.value].add_(hormone_absorption)
 
     def add_neurons(self, positions: Tensor, latent_states: Tensor, set_parameters: bool = True):
         """
