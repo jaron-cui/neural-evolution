@@ -28,10 +28,6 @@ class _Properties(IntEnum):
     HORMONE_INFLUENCE = 11
 
     POSITION = 12
-    INPUT_INDICES = 13
-    INPUT_CONNECTIVITY = 14
-    OUTPUT_INDICES = 15
-    OUTPUT_CONNECTIVITY = 16
 
 
 _DATA_SIZES = {
@@ -51,10 +47,6 @@ _DATA_SIZES = {
     _Properties.HORMONE_INFLUENCE: _HORMONE_DIM,
 
     _Properties.POSITION: 3,
-    _Properties.INPUT_INDICES: MAX_CONNECTIONS,
-    _Properties.INPUT_CONNECTIVITY: MAX_CONNECTIONS,
-    _Properties.OUTPUT_INDICES: MAX_CONNECTIONS,
-    _Properties.OUTPUT_CONNECTIVITY: MAX_CONNECTIONS,
 }
 
 
@@ -107,10 +99,6 @@ class Data(Enum):
 
     # Hidden State Parameters -------------
     POSITION = _get_indexing(_Properties.POSITION)
-    INPUT_INDICES = _get_indexing(_Properties.INPUT_INDICES)
-    INPUT_CONNECTIVITY = _get_indexing(_Properties.INPUT_CONNECTIVITY)
-    OUTPUT_INDICES = _get_indexing(_Properties.OUTPUT_INDICES)
-    OUTPUT_CONNECTIVITY = _get_indexing(_Properties.OUTPUT_CONNECTIVITY)
 
     # Shortcuts
     # - shortcut slices to subsections of above parameters
