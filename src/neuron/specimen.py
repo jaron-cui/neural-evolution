@@ -1,9 +1,11 @@
 from dataclasses import dataclass
+from typing import Tuple
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor, nn
 
-from neuron.data_structure import NEURON_DATA_DIM, Data
+from neuron.data_structure import NEURON_DATA_DIM, Data, NEURON_DIAMETER, MAX_CONNECTIONS
 
 
 @dataclass
@@ -25,11 +27,13 @@ class Genome:
     mitosis_results: nn.Module
     # sigmoid(mitosis_health_penalty) / 2 + 0.5 is the cell damage increment upon mitosis
     mitosis_damage: float
+    connection_range: float
 
 
 class Specimen:
-    def __init__(self, genome: Genome):
+    def __init__(self, genome: Genome, neuron_repulsion: float = 0.01):
         self.genome = genome
+        self.neuron_repulsion = neuron_repulsion
 
         initial_neuron_buffer_size = 16
         self.living_neuron_indices = []
@@ -41,18 +45,25 @@ class Specimen:
         previous_neurons = self.neurons[indices]
         updated_neurons = previous_neurons.clone()
 
-        # handle firing and passive neuron state updates
-        self._handle_state_transform_updates(previous_neurons, updated_neurons, indices)
         # handle hormone emission, absorption, and decay
         self._handle_hormones(previous_neurons, updated_neurons)
-        # handle cell death
-        # handle cell division
+        # handle firing and passive neuron state updates
+        self._handle_state_transform_updates(previous_neurons, updated_neurons, indices)
+        # handle cell death and division
+        updated_neurons, indices = self._handle_life_and_death(updated_neurons, indices)
+
+        positions = updated_neurons[: Data.POSITION.value]
+        diffs = positions[:, None, :] - positions[None, :, :]  # shape: (n, n, 3)
+        distances = torch.norm(diffs, dim=-1)
+        directions = diffs / distances
         # update neuron positions
+        self._handle_physics(updated_neurons, diffs, directions)
         # update connectivity
+        self._handle_connections(updated_neurons, indices)
         # update direct parameters
         # update derived parameters
 
-    def _handle_state_transform_updates(self, previous_neurons: Tensor, updated_neurons: Tensor, indices):
+    def _handle_state_transform_updates(self, previous_neurons: Tensor, updated_neurons: Tensor, indices: Tensor):
         # locate neurons that are ready to fire signals - ion threshold reached and firing warmup completed
         activation_threshold_reached = (
             previous_neurons[:, Data.ACTIVATION_PROGRESS.value]
@@ -107,7 +118,44 @@ class Specimen:
         hormone_absorption = torch.einsum("ij,ik->jk", hormone_strengths, hormones)  # (n, 10)
         updated_neurons[:, Data.HORMONE_INFLUENCE.value].add_(hormone_absorption)
 
-    def add_neurons(self, positions: Tensor, latent_states: Tensor, set_parameters: bool = True):
+    def _handle_life_and_death(self, updated_neurons: Tensor, indices: Tensor) -> Tuple[Tensor, Tensor]:
+        # initiate apoptosis
+        dying_neurons = updated_neurons[:, Data.CELL_DAMAGE.value] >= 1
+        self._deallocate_neurons(indices[dying_neurons])
+        surviving_neurons = updated_neurons[~dying_neurons]
+        surviving_indices = indices[~dying_neurons]
+
+        # find dividing cells
+        is_dividing = surviving_neurons[:, Data.MITOSIS_STAGE.value] >= 1
+        dividing_neurons = surviving_neurons[is_dividing]
+
+        mitosis_results: Tensor = self.genome.mitosis_results(dividing_neurons[:, Data.STATE.value])
+        parent_latent = mitosis_results[Data.MITOSIS_PARENT_LATENT.value]
+        child_latent = mitosis_results[Data.MITOSIS_CHILD_LATENT.value]
+        split_offset = F.normalize(mitosis_results[Data.MITOSIS_SPLIT_POSITION.value]) * (NEURON_DIAMETER / 2)
+        child_position = dividing_neurons[:, Data.POSITION.value] + split_offset
+
+        dividing_neurons[:, Data.LATENT_STATE.value].copy_(parent_latent)
+        child_indices = self.add_neurons(child_position, child_latent)
+
+        updated_neurons = torch.cat([surviving_neurons, self.neurons[child_indices]], dim=0)
+        updated_neurons[:, Data.CELL_DAMAGE.value].sub_(F.sigmoid(self.genome.mitosis_damage))
+
+        return (
+            updated_neurons,
+            torch.cat([surviving_indices, child_indices], dim=0)
+        )
+
+    def _handle_physics(self, neurons: Tensor, diffs: Tensor, directions: Tensor):
+        movements = directions * NEURON_DIAMETER - diffs
+        movements[movements.dot(directions) < 0].zero_()
+        movements.mul_(self.neuron_repulsion / NEURON_DIAMETER)
+        cumulative_movements = movements.sum(dim=1)
+        neurons[:, Data.POSITION.value].add_(cumulative_movements)
+
+
+
+    def add_neurons(self, positions: Tensor, latent_states: Tensor, set_parameters: bool = True) -> Tensor:
         """
 
 
@@ -117,17 +165,19 @@ class Specimen:
         :param positions:
         :param latent_states:
         :param set_parameters:
-        :return:
+        :return: the allocated neuron indices
         """
         neuron_indices = self._allocate_neurons(positions.size(0))
 
-        self.neurons[neuron_indices, :] = 0
+        self.neurons[neuron_indices, :].zero_()
         self.neurons[neuron_indices, Data.POSITION.value] = positions
         self.neurons[neuron_indices, Data.LATENT_STATE.value] = latent_states
 
         if set_parameters:
             parameters = self.genome.derive_parameters_from_state(self.neurons[neuron_indices, Data.STATE.value])
             self.neurons[neuron_indices, Data.DERIVED_PARAMETERS.value] = parameters
+
+        return neuron_indices
 
     def _allocate_neurons(self, neuron_count: int) -> Tensor:
         # allocate more space if necessary

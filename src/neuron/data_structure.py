@@ -7,8 +7,8 @@ from typing import Union, Tuple
 from enum import Enum, IntEnum
 
 _HORMONE_DIM = 10
-_MAX_CONNECTIONS = 8
 _LATENT_DIM = 24
+MAX_CONNECTIONS = 8
 
 
 class _Properties(IntEnum):
@@ -51,10 +51,10 @@ _DATA_SIZES = {
     _Properties.HORMONE_INFLUENCE: _HORMONE_DIM,
 
     _Properties.POSITION: 3,
-    _Properties.INPUT_INDICES: _MAX_CONNECTIONS,
-    _Properties.INPUT_CONNECTIVITY: _MAX_CONNECTIONS,
-    _Properties.OUTPUT_INDICES: _MAX_CONNECTIONS,
-    _Properties.OUTPUT_CONNECTIVITY: _MAX_CONNECTIONS,
+    _Properties.INPUT_INDICES: MAX_CONNECTIONS,
+    _Properties.INPUT_CONNECTIVITY: MAX_CONNECTIONS,
+    _Properties.OUTPUT_INDICES: MAX_CONNECTIONS,
+    _Properties.OUTPUT_CONNECTIVITY: MAX_CONNECTIONS,
 }
 
 
@@ -122,8 +122,11 @@ class Data(Enum):
         _Properties.ACTIVATION_WARMUP, _Properties.MITOSIS_STAGE, offset_from=_Properties.ACTIVATION_WARMUP)
     TRANSFORM_LATENT = _get_block_segment(
         _Properties.LATENT_STATE, _Properties.LATENT_STATE, offset_from=_Properties.ACTIVATION_WARMUP)
+    MITOSIS_PARENT_LATENT = slice(0, _LATENT_DIM)
+    MITOSIS_CHILD_LATENT = slice(_LATENT_DIM, _LATENT_DIM * 2)
+    MITOSIS_SPLIT_POSITION = slice(_LATENT_DIM * 2, _LATENT_DIM * 2 + 3)
 
 
 NEURON_DATA_DIM = sum(_DATA_SIZES.values())
-
+NEURON_DIAMETER = 1
 
