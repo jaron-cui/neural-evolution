@@ -1,35 +1,11 @@
-from dataclasses import dataclass
 from typing import Tuple
 
 import torch
 import torch.nn.functional as F
-from torch import Tensor, nn
+from torch import Tensor
 
-from neuron.data_structure import NEURON_DATA_DIM, Data, NEURON_DIAMETER, MAX_CONNECTIONS
-
-
-@dataclass
-class Genome:
-    # initial latent state for the first neuron(s)
-    pluripotent_latent_state: Tensor
-    # takes in internal state, outputs activation parameters and health parameter changes
-    derive_parameters_from_state: nn.Module
-    # takes in internal state, outputs derived parameters
-    passive_transform: nn.Module
-    # takes in internal state, outputs new latent state and state updates
-    activation_transform: nn.Module
-    # values that have sigmoid applied and are multiplied against hormone_influence each step
-    hormone_decay: Tensor
-    # takes in internal state pair and relative position (emitter and receiver and emitter to receiver),
-    # outputs receptivity of latter [0,1]
-    connectivity_coefficient: nn.Module
-    # takes in internal state, outputs new latent state and daughter latent state and mitosis direction
-    mitosis_results: nn.Module
-    # sigmoid(mitosis_health_penalty) / 2 + 0.5 is the cell damage increment upon mitosis
-    mitosis_damage: float
-    connection_range: float
-    # value that has sigmoid applied and is multiplied against activation_progress each step
-    activation_decay: float
+from neuron.data_structure import NEURON_DATA_DIM, Data, NEURON_DIAMETER
+from neuron.genome import Genome
 
 
 class Specimen:
@@ -53,12 +29,13 @@ class Specimen:
         directions = diffs / distances
         directions[directions.isnan()] = 0
 
+        connectivity = self._compute_connectivity(previous_neurons, updated_neurons, distances)
         # update neuron positions
-        self._handle_physics(updated_neurons, diffs, directions)
+        self._handle_physics(updated_neurons, diffs, directions, distances, connectivity)
         # handle hormone emission, absorption, and decay
         self._handle_hormones(previous_neurons, updated_neurons, distances)
         # handle firing and passive neuron state updates
-        self._handle_state_transform_updates(previous_neurons, updated_neurons, indices, distances)
+        self._handle_state_transform_updates(previous_neurons, updated_neurons, indices, connectivity)
         # handle cell death and division
         updated_neurons, indices = self._handle_life_and_death(updated_neurons, indices)
         # update derived parameters
@@ -66,32 +43,10 @@ class Specimen:
         updated_neurons[:, Data.DERIVED_PARAMETERS.value] = derived_parameters
 
     def _handle_state_transform_updates(
-        self, previous_neurons: Tensor, updated_neurons: Tensor, indices: Tensor, distances: Tensor
+        self, previous_neurons: Tensor, updated_neurons: Tensor, indices: Tensor, connectivity: Tensor
     ):
         # decay ions
         updated_neurons[:, Data.ACTIVATION_PROGRESS.value].mul_(self.genome.activation_decay)
-
-        # calculate connectivity
-        in_range = distances <= self.genome.connection_range
-        in_range_indices = torch.nonzero(in_range, as_tuple=False)
-        sender_indices = in_range_indices[:, 0]
-        receiver_indices = in_range_indices[:, 1]
-
-        sender_states = previous_neurons[sender_indices, Data.STATE.value]
-        receiver_states = previous_neurons[receiver_indices, Data.STATE.value]
-        connection_strengths = F.sigmoid(
-            self.genome.connectivity_coefficient(torch.cat([sender_states, receiver_states], dim=1))
-        )
-        scoring_grid = torch.zeros_like(distances)
-        scoring_grid[in_range_indices] = connection_strengths
-        receptivity_scores = scoring_grid.sum(dim=0)
-        emissivity_scores = scoring_grid.sum(dim=1)
-        updated_neurons[:, Data.TOTAL_RECEPTIVITY.value] = receptivity_scores
-        updated_neurons[:, Data.TOTAL_EMISSIVITY.value] = emissivity_scores
-
-        connectivity_grid = torch.full_like(distances, fill_value=float('-inf'))
-        connectivity_grid[in_range_indices] = connection_strengths
-        connectivity = connectivity_grid.softmax(dim=1)  # (n, n)
 
         # locate neurons that are ready to fire signals - ion threshold reached and firing warmup completed
         activation_threshold_reached = (
@@ -114,6 +69,7 @@ class Specimen:
             activated_state_update[:, Data.TRANSFORM_INCREMENTED.value])
         updated_neurons[~activated, Data.INCREMENTED_PARAMETERS.value].add_(
             passive_state_update[:, Data.TRANSFORM_INCREMENTED.value])
+        updated_neurons[:, Data.INCREMENTED_PARAMETERS.value].relu_()
         # set the updates to the latent state
         updated_neurons[activated, Data.LATENT_STATE.value].copy_(
             activated_state_update[:, Data.TRANSFORM_LATENT.value])
@@ -166,12 +122,47 @@ class Specimen:
             torch.cat([surviving_indices, child_indices], dim=0)
         )
 
-    def _handle_physics(self, neurons: Tensor, diffs: Tensor, directions: Tensor):
-        movements = directions * NEURON_DIAMETER - diffs
-        movements[movements.dot(directions) < 0].zero_()
-        movements.mul_(self.neuron_repulsion / NEURON_DIAMETER)
-        cumulative_movements = movements.sum(dim=1)
-        neurons[:, Data.POSITION.value].add_(cumulative_movements)
+    def _handle_physics(
+        self, neurons: Tensor, diffs: Tensor, directions: Tensor, distances: Tensor, connectivity: Tensor
+    ):
+        lo, hi = self.genome.connection_range - self.genome.connection_pull_margin, self.genome.connection_range
+        in_range_mask = (distances <= hi) & (distances >= lo)
+        attraction_strength = torch.zeros_like(distances)
+        attraction_strength[in_range_mask] = (distances[in_range_mask] - lo) / self.genome.connection_pull_margin
+        attraction_strength.mul_(connectivity).mul_(self.genome.connection_pull_strength)
+        attraction = -directions * attraction_strength
+
+        repulsion = directions * NEURON_DIAMETER - diffs
+        repulsion[repulsion.dot(directions) < 0].zero_()
+        repulsion.mul_(self.neuron_repulsion / NEURON_DIAMETER)
+        cumulative_movements = repulsion.sum(dim=1) + attraction.sum(dim=1)
+        cumulative_movement_perturbed = torch.normal(cumulative_movements, std=0.02)
+        neurons[:, Data.POSITION.value].add_(cumulative_movement_perturbed)
+
+    def _compute_connectivity(self, previous_neurons: Tensor, updated_neurons: Tensor, distances: Tensor) -> Tensor:
+        # calculate connectivity
+        in_range = distances <= self.genome.connection_range
+        in_range_indices = torch.nonzero(in_range, as_tuple=False)
+        sender_indices = in_range_indices[:, 0]
+        receiver_indices = in_range_indices[:, 1]
+
+        sender_states = previous_neurons[sender_indices, Data.STATE.value]
+        receiver_states = previous_neurons[receiver_indices, Data.STATE.value]
+        connection_strengths = F.sigmoid(
+            self.genome.connectivity_coefficient(torch.cat([sender_states, receiver_states], dim=1))
+        )
+        scoring_grid = torch.zeros_like(distances)
+        scoring_grid[in_range_indices] = connection_strengths
+        receptivity_scores = scoring_grid.sum(dim=0)
+        emissivity_scores = scoring_grid.sum(dim=1)
+        updated_neurons[:, Data.TOTAL_RECEPTIVITY.value] = receptivity_scores
+        updated_neurons[:, Data.TOTAL_EMISSIVITY.value] = emissivity_scores
+
+        connectivity_grid = torch.full_like(distances, fill_value=float('-inf'))
+        connectivity_grid[in_range_indices] = connection_strengths
+        connectivity = connectivity_grid.softmax(dim=1)  # (n, n)
+
+        return connectivity
 
     def add_neurons(self, positions: Tensor, latent_states: Tensor, set_parameters: bool = True) -> Tensor:
         """
