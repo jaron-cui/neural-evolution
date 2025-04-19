@@ -6,8 +6,8 @@ from typing import Union, Tuple
 # 2. Genome can just live in a class
 from enum import Enum, IntEnum
 
-_HORMONE_DIM = 10
-_LATENT_DIM = 24
+HORMONE_DIM = 10
+LATENT_DIM = 24
 MAX_CONNECTIONS = 8
 
 
@@ -33,18 +33,18 @@ class _Properties(IntEnum):
 _DATA_SIZES = {
     _Properties.ACTIVATION_THRESHOLD: 1,
     _Properties.SIGNAL_STRENGTH: 1,
-    _Properties.HORMONE_EMISSION: _HORMONE_DIM,
+    _Properties.HORMONE_EMISSION: HORMONE_DIM,
     _Properties.HORMONE_RANGE: 1,
 
     _Properties.ACTIVATION_WARMUP: 1,
     _Properties.CELL_DAMAGE: 1,
     _Properties.MITOSIS_STAGE: 1,
 
-    _Properties.LATENT_STATE: _LATENT_DIM,
+    _Properties.LATENT_STATE: LATENT_DIM,
     _Properties.TOTAL_RECEPTIVITY: 1,
     _Properties.TOTAL_EMISSIVITY: 1,
     _Properties.ACTIVATION_PROGRESS: 1,
-    _Properties.HORMONE_INFLUENCE: _HORMONE_DIM,
+    _Properties.HORMONE_INFLUENCE: HORMONE_DIM,
 
     _Properties.POSITION: 3,
 }
@@ -110,11 +110,31 @@ class Data(Enum):
         _Properties.ACTIVATION_WARMUP, _Properties.MITOSIS_STAGE, offset_from=_Properties.ACTIVATION_WARMUP)
     TRANSFORM_LATENT = _get_block_segment(
         _Properties.LATENT_STATE, _Properties.LATENT_STATE, offset_from=_Properties.ACTIVATION_WARMUP)
-    MITOSIS_PARENT_LATENT = slice(0, _LATENT_DIM)
-    MITOSIS_CHILD_LATENT = slice(_LATENT_DIM, _LATENT_DIM * 2)
-    MITOSIS_SPLIT_POSITION = slice(_LATENT_DIM * 2, _LATENT_DIM * 2 + 3)
+    MITOSIS_PARENT_LATENT = slice(0, LATENT_DIM)
+    MITOSIS_CHILD_LATENT = slice(LATENT_DIM, LATENT_DIM * 2)
+    MITOSIS_SPLIT_POSITION = slice(LATENT_DIM * 2, LATENT_DIM * 2 + 3)
 
 
 NEURON_DATA_DIM = sum(_DATA_SIZES.values())
+DERIVED_PARAMETERS_SIZE = sum([
+    _DATA_SIZES[prop] for prop in [
+        _Properties.ACTIVATION_THRESHOLD, _Properties.SIGNAL_STRENGTH, _Properties.HORMONE_EMISSION,
+        _Properties.HORMONE_RANGE
+    ]
+])
+INCREMENTED_PARAMETERS_SIZE = sum([
+    _DATA_SIZES[prop] for prop in [
+        _Properties.ACTIVATION_WARMUP, _Properties.CELL_DAMAGE, _Properties.MITOSIS_STAGE
+    ]
+])
+STATE_SIZE = sum([
+    _DATA_SIZES[prop] for prop in [
+        _Properties.ACTIVATION_WARMUP, _Properties.CELL_DAMAGE, _Properties.MITOSIS_STAGE, _Properties.LATENT_STATE,
+        _Properties.TOTAL_RECEPTIVITY, _Properties.TOTAL_EMISSIVITY, _Properties.ACTIVATION_PROGRESS,
+        _Properties.HORMONE_INFLUENCE
+    ]
+])
+TRANSFORM_SIZE = INCREMENTED_PARAMETERS_SIZE + _DATA_SIZES[_Properties.LATENT_STATE]
+MITOSIS_SIZE = LATENT_DIM * 2 + 3
+HIDDEN_DIM = 200
 NEURON_DIAMETER = 1
-
