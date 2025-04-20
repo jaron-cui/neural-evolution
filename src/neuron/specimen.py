@@ -82,11 +82,13 @@ class Specimen:
         # print('after2', updated_neurons[~activated, Data.LATENT_STATE.value])
 
         updated_neurons[:, Data.INCREMENTED_PARAMETERS.value] = (
-            updated_neurons[:, Data.INCREMENTED_PARAMETERS.value].relu())
+            updated_neurons[:, Data.INCREMENTED_PARAMETERS.value].clamp_min(0))
         # print('after1', updated_neurons[~activated, Data.LATENT_STATE.value])
         # set the updates to the latent state
         updated_neurons[activated, Data.LATENT_STATE.value] = activated_state_update[:, Data.TRANSFORM_LATENT.value]
         updated_neurons[~activated, Data.LATENT_STATE.value] = passive_state_update[:, Data.TRANSFORM_LATENT.value]
+        # if we don't normalize the latent, it will explode in magnitude since it is technically recurrent over time
+        updated_neurons[:, Data.LATENT_STATE.value] = F.normalize(updated_neurons[:, Data.LATENT_STATE.value], dim=1)
         # print('after', updated_neurons[~activated, Data.LATENT_STATE.value])
 
         # send signals to destination neurons
@@ -107,7 +109,10 @@ class Specimen:
         # smooth falloff function: strength = max(log10(10 - distance * 9/range), 0)
         # print(distances.shape, previous_neurons[:, Data.HORMONE_RANGE.value].shape)
         hormone_strengths = torch.log10(
-            10 - distances * (9 / previous_neurons[:, Data.HORMONE_RANGE.value])).relu()  # (n, n)
+            10 - distances * (9 / previous_neurons[:, Data.HORMONE_RANGE.value])).clamp_min(0)  # (n, n)
+        # will be nan if distance is greater than hormone range (log(x < 0) is nan), or if hormone range is 0
+        # in both cases, the effective hormone strength should be 0
+        hormone_strengths[hormone_strengths.isnan()] = 0
         hormones = previous_neurons[:, Data.HORMONE_EMISSION.value]
         scaled_hormones = hormone_strengths.unsqueeze(2) * hormones.unsqueeze(1)  # (n, n, h)
         hormone_absorption = scaled_hormones.sum(dim=0)
@@ -118,7 +123,7 @@ class Specimen:
         # initiate apoptosis
         # if self.device == torch.device('cuda'):
         #     torch.cuda.synchronize()
-        dying_neurons = (updated_neurons.cpu()[:, Data.CELL_DAMAGE.value] >= 1).cuda()
+        dying_neurons = updated_neurons[:, Data.CELL_DAMAGE.value] >= 1
         self._deallocate_neurons(indices[dying_neurons])
         surviving_neurons = updated_neurons[~dying_neurons]
         surviving_indices = indices[~dying_neurons]
@@ -130,6 +135,7 @@ class Specimen:
         dividing_neurons = surviving_neurons[is_dividing]
         dividing_neurons[:, Data.MITOSIS_STAGE.value] = 0
 
+        print(dividing_neurons[:, Data.STATE.value].isnan().any(), 'mit?')
         mitosis_results: Tensor = self.genome.mitosis_results(dividing_neurons[:, Data.STATE.value])
         parent_latent = mitosis_results[:, Data.MITOSIS_PARENT_LATENT.value]
         child_latent = mitosis_results[:, Data.MITOSIS_CHILD_LATENT.value]
@@ -165,7 +171,7 @@ class Specimen:
 
         in_range_mask = distances < NEURON_DIAMETER
         repulsion_strength = torch.zeros_like(distances, device=self.device)
-        repulsion_strength[in_range_mask] = (1 - distances[in_range_mask] / NEURON_DIAMETER).relu()
+        repulsion_strength[in_range_mask] = (1 - distances[in_range_mask] / NEURON_DIAMETER).clamp_min(0)
         repulsion_strength *= self.neuron_repulsion
 
         net_strength = attraction_strength + repulsion_strength
@@ -248,5 +254,4 @@ class Specimen:
     def _deallocate_neurons(self, indices: Tensor):
         indices = set(indices.tolist())
         self.living_neuron_indices = list(filter(lambda i: i not in indices, self.living_neuron_indices))
-        # print('deallocated', self.living_neuron_indices, indices, list(filter(lambda i: i not in indices, self.living_neuron_indices)))
         self.dead_neurons_indices.extend(indices)
