@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Tuple
 
 import torch
@@ -13,6 +14,7 @@ class Specimen:
         self.genome = genome.to(device)
         self.neuron_repulsion = neuron_repulsion
         self.device = device
+        self.log = StepLog()
 
         initial_neuron_buffer_size = 16
         self.living_neuron_indices = []
@@ -20,6 +22,7 @@ class Specimen:
         self.neurons = torch.zeros((initial_neuron_buffer_size, NEURON_DATA_DIM), device=device)
 
     def step(self):
+        self.log = StepLog()
         indices = torch.tensor(self.living_neuron_indices, dtype=torch.int, device=self.device)
         previous_neurons = self.neurons[indices]
         updated_neurons = previous_neurons.clone()
@@ -46,6 +49,8 @@ class Specimen:
         updated_neurons[:, Data.DERIVED_PARAMETERS.value] = derived_parameters
 
         self.neurons[indices] = updated_neurons
+
+        self.log.neuron_count = len(self.living_neuron_indices)
 
     def _handle_state_transform_updates(
         self, previous_neurons: Tensor, updated_neurons: Tensor, connectivity: Tensor
@@ -123,10 +128,10 @@ class Specimen:
         # initiate apoptosis
         # if self.device == torch.device('cuda'):
         #     torch.cuda.synchronize()
-        dying_neurons = updated_neurons[:, Data.CELL_DAMAGE.value] >= 1
-        self._deallocate_neurons(indices[dying_neurons])
-        surviving_neurons = updated_neurons[~dying_neurons]
-        surviving_indices = indices[~dying_neurons]
+        is_dying = updated_neurons[:, Data.CELL_DAMAGE.value] >= 1
+        self._deallocate_neurons(indices[is_dying])
+        surviving_neurons = updated_neurons[~is_dying]
+        surviving_indices = indices[~is_dying]
 
         # find dividing cells
         is_dividing = surviving_neurons[:, Data.MITOSIS_STAGE.value] >= 1
@@ -135,7 +140,6 @@ class Specimen:
         dividing_neurons = surviving_neurons[is_dividing]
         dividing_neurons[:, Data.MITOSIS_STAGE.value] = 0
 
-        print(dividing_neurons[:, Data.STATE.value].isnan().any(), 'mit?')
         mitosis_results: Tensor = self.genome.mitosis_results(dividing_neurons[:, Data.STATE.value])
         parent_latent = mitosis_results[:, Data.MITOSIS_PARENT_LATENT.value]
         child_latent = mitosis_results[:, Data.MITOSIS_CHILD_LATENT.value]
@@ -153,6 +157,8 @@ class Specimen:
 
         updated_neurons = torch.cat([surviving_neurons, self.neurons[child_indices]], dim=0)
 
+        self.log.neuron_death_count = is_dying.sum().item()
+        self.log.neuron_creation_count = is_dividing.sum().item()
         return (
             updated_neurons,
             torch.cat([surviving_indices, child_indices], dim=0)
@@ -255,3 +261,10 @@ class Specimen:
         indices = set(indices.tolist())
         self.living_neuron_indices = list(filter(lambda i: i not in indices, self.living_neuron_indices))
         self.dead_neurons_indices.extend(indices)
+
+
+class StepLog:
+    def __init__(self):
+        self.neuron_death_count = 0
+        self.neuron_creation_count = 0
+        self.neuron_count = 0
