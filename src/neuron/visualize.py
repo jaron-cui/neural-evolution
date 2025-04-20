@@ -27,26 +27,26 @@ def draw_specimen(specimen: Specimen):
     # plt.show()
 
 
-genome = init_genome()
-specimen = Specimen(genome)
-specimen.add_neurons(
-    torch.Tensor([[20, 20, 0], [22, 20, 0]]),
-    genome.pluripotent_latent_state.unsqueeze(0).repeat((2, 1))
-)
+# genome = init_genome()
+# specimen = Specimen(genome)
+# specimen.add_neurons(
+#     torch.Tensor([[20, 20, 0], [22, 20, 0]]),
+#     genome.pluripotent_latent_state.unsqueeze(0).repeat((2, 1))
+# )
 
-start = time.time()
-for i in range(350):
-    # print('Stepping')
-    specimen.step()
-    # print(len(specimen.living_neuron_indices))
-    # print(i)
-    # print('Stepped', time.time() - start)
-    # draw_specimen(specimen)
-    # key = cv2.waitKey(0)
-    # if key == ord('q'):
-    #     break
-print(time.time() - start)
-cv2.destroyAllWindows()
+# start = time.time()
+# for i in range(350):
+#     # print('Stepping')
+#     specimen.step()
+#     # print(len(specimen.living_neuron_indices))
+#     # print(i)
+#     # print('Stepped', time.time() - start)
+#     # draw_specimen(specimen)
+#     # key = cv2.waitKey(0)
+#     # if key == ord('q'):
+#     #     break
+# print(time.time() - start)
+# cv2.destroyAllWindows()
 
 # neurons = np.load('before_bad.npy')
 # indices = np.load('indices.npy')
