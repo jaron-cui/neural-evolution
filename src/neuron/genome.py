@@ -50,6 +50,41 @@ class Genome:
             self.activation_decay
         )
 
+    def save(self, path: str):
+        state_dict = {
+            'pluripotent_latent_state': self.pluripotent_latent_state,
+            'derive_parameters_from_state': self.derive_parameters_from_state,
+            'passive_transform': self.passive_transform,
+            'activation_transform': self.activation_transform,
+            'hormone_decay': self.hormone_decay,
+            'connectivity_coefficient': self.connectivity_coefficient,
+            'mitosis_results': self.mitosis_results,
+            'mitosis_damage': self.mitosis_damage,
+            'connection_range': self.connection_range,
+            'connection_pull_margin': self.connection_pull_margin,
+            'connection_pull_strength': self.connection_pull_strength,
+            'activation_decay': self.activation_decay
+        }
+        torch.save(state_dict, path)
+
+    @staticmethod
+    def load(path: str) -> 'Genome':
+        state_dict = torch.load(path, weights_only=False)
+        return Genome(
+            state_dict['pluripotent_latent_state'],
+            state_dict['derive_parameters_from_state'],
+            state_dict['passive_transform'],
+            state_dict['activation_transform'],
+            state_dict['hormone_decay'],
+            state_dict['connectivity_coefficient'],
+            state_dict['mitosis_results'],
+            state_dict['mitosis_damage'],
+            state_dict['connection_range'],
+            state_dict['connection_pull_margin'],
+            state_dict['connection_pull_strength'],
+            state_dict['activation_decay']
+        )
+
 
 class MinibatchWrapper(nn.Module):
     def __init__(self, module: nn.Module, batch_size: int):
@@ -58,6 +93,7 @@ class MinibatchWrapper(nn.Module):
         self.batch_size = batch_size
 
     def forward(self, x: Tensor):
+        torch.cuda.empty_cache()
         if x.size(0) <= self.batch_size:
             return self.module(x)
         results = []
