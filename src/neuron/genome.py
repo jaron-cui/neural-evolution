@@ -43,7 +43,7 @@ def init_genome():
         connectivity_coefficient=init_connectivity_coefficient(),
         mitosis_results=init_mitosis_results(),
         mitosis_damage=0.5,
-        connection_range=2,
+        connection_range=5,
         connection_pull_margin=1.0,
         connection_pull_strength=0.1,
         activation_decay=0.9
@@ -72,7 +72,7 @@ def init_derive_parameters_from_state():
     with torch.no_grad():
         layer4.bias.copy_(initial_output)
 
-    return nn.Sequential(layer1, nn.GELU(), layer2, nn.GELU(), layer3, nn.GELU(), layer4)
+    return nn.Sequential(layer1, nn.ReLU(), layer2, nn.ReLU(), layer3, nn.ReLU(), layer4)
 
 
 def init_passive_transform():
@@ -80,7 +80,8 @@ def init_passive_transform():
     # desired initial output: [0.1, -0.1, 0.02, <identity of latent>]
     assert HIDDEN_DIM >= STATE_SIZE
     input_matrix = torch.zeros((HIDDEN_DIM, STATE_SIZE))
-    input_matrix[:LATENT_DIM, :LATENT_DIM].copy_(torch.eye(LATENT_DIM))  # put an identity matrix into the top of the weights
+    # print(Data.TRANSFORM_LATENT.value)
+    input_matrix[:LATENT_DIM, Data.TRANSFORM_LATENT.value].copy_(torch.eye(LATENT_DIM))  # put an identity matrix into the top of the weights
     hidden_matrix = torch.zeros((HIDDEN_DIM, HIDDEN_DIM))
     hidden_matrix[:LATENT_DIM, :LATENT_DIM].copy_(torch.eye(LATENT_DIM))
     output_matrix = torch.zeros((TRANSFORM_SIZE, HIDDEN_DIM))
@@ -99,8 +100,26 @@ def init_passive_transform():
         layer3.weight.copy_(hidden_matrix)
         layer4.weight.copy_(output_matrix)
         layer4.bias.copy_(output_bias)
-
-    return nn.Sequential(layer1, nn.GELU(), layer2, nn.GELU(), layer3, nn.GELU(), layer4)
+    # print(input_matrix)
+    # print(hidden_matrix)
+    # print(output_matrix)
+    # class M(nn.Module):
+    #     def forward(self, x):
+    #         if x.numel() == 0:
+    #             return nn.Sequential(layer1, nn.ReLU(), layer2, nn.ReLU(), layer3, nn.ReLU(), layer4)(x)
+    #         out = layer1(x)
+    #         print(out.max().item())
+    #         out = nn.functional.relu(out)
+    #         out = layer2(out)
+    #         print(out.max().item())
+    #         out = nn.functional.relu(out)
+    #         out = layer3(out)
+    #         print(out.max().item())
+    #         out = nn.functional.relu(out)
+    #         out = layer4(out)
+    #         print(out.max().item())
+    #         return out
+    return nn.Sequential(layer1, nn.ReLU(), layer2, nn.ReLU(), layer3, nn.ReLU(), layer4)
 
 
 def init_connectivity_coefficient():
@@ -129,7 +148,7 @@ def init_connectivity_coefficient():
         layer3.bias.copy_(-1.0)
         layer4.weight.copy_(sum_matrix)
 
-    return nn.Sequential(layer1, nn.GELU(), layer2, nn.GELU(), layer3, nn.GELU(), layer4)
+    return nn.Sequential(layer1, nn.ReLU(), layer2, nn.ReLU(), layer3, nn.ReLU(), layer4)
 
 
 def init_mitosis_results():
@@ -153,7 +172,7 @@ def init_mitosis_results():
         layer3.weight.copy_(hidden_matrix)
         layer4.weight.copy_(output_matrix)
 
-    return nn.Sequential(layer1, nn.GELU(), layer2, nn.GELU(), layer3, nn.GELU(), layer4)
+    return nn.Sequential(layer1, nn.ReLU(), layer2, nn.ReLU(), layer3, nn.ReLU(), layer4)
 
 
 def empty_linear(*shape):
