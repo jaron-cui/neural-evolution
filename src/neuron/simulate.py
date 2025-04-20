@@ -1,3 +1,4 @@
+import time
 from typing import List, Tuple
 
 import numpy as np
@@ -30,8 +31,11 @@ def simulate_run(specimen: Specimen, iterations: int) -> float:
     score = 0
     for i in range(iterations):
         specimen.step()
+        # closeness to desired neuron count
         score += 1 - (abs(len(specimen.living_neuron_indices) - optimal_neuron_count) / optimal_neuron_count)
-        if len(specimen.living_neuron_indices) > cancer_threshold:
+        # penalize neuron deaths
+        score -= (specimen.log.neuron_death_count / optimal_neuron_count)**2 * 2
+        if specimen.log.neuron_count > cancer_threshold or specimen.log.neuron_count == 0:
             return score
     return score
 
@@ -56,13 +60,15 @@ def create_specimen(genome: Genome) -> Specimen:
 
 
 def main():
+    torch.set_grad_enabled(False)
     generation_size = 100
     population = reproduce([init_genome()], generation_size)
     for generation in range(10):
-        results = simulate_generation(population, survival_rate=0.1, iterations=600)
+        results = simulate_generation(population, survival_rate=0.1, iterations=1200)
         scores = [score for _, score in results]
         population = reproduce([genome for genome, _ in results], generation_size)
-        print(f'Average score for generation {generation} survivors: {sum(scores) / len(scores)}')
+        print(f'Average score for generation {generation} survivors: {sum(scores) / len(scores)}', flush=True)
+        population[0].save(f'../../checkpoints/genome.pt')
 
 
 if __name__ == '__main__':
