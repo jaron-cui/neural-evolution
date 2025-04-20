@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 
 import copy
@@ -33,6 +34,38 @@ class Genome:
     # value that has sigmoid applied and is multiplied against activation_progress each step
     activation_decay: float
 
+    def to(self, device: torch.device):
+        return Genome(
+            self.pluripotent_latent_state.to(device),
+            self.derive_parameters_from_state.to(device),
+            self.passive_transform.to(device),
+            self.activation_transform.to(device),
+            self.hormone_decay.to(device),
+            self.connectivity_coefficient.to(device),
+            self.mitosis_results.to(device),
+            self.mitosis_damage,
+            self.connection_range,
+            self.connection_pull_margin,
+            self.connection_pull_strength,
+            self.activation_decay
+        )
+
+
+class MinibatchWrapper(nn.Module):
+    def __init__(self, module: nn.Module, batch_size: int):
+        super().__init__()
+        self.module = module
+        self.batch_size = batch_size
+
+    def forward(self, x: Tensor):
+        if x.size(0) <= self.batch_size:
+            return self.module(x)
+        results = []
+        for batch_index in range(math.ceil(x.size(0) / self.batch_size)):
+            result = self.module(x[batch_index * self.batch_size:(batch_index + 1) * self.batch_size])
+            results.append(result)
+        return torch.cat(results, dim=0)
+
 
 def mutate_genome(genome: Genome) -> Genome:
     std = 0.01
@@ -45,11 +78,11 @@ def mutate_genome(genome: Genome) -> Genome:
         hormone_decay=torch.normal(genome.hormone_decay, std),
         connectivity_coefficient=mutate_network(genome.connectivity_coefficient, std),
         mitosis_results=mutate_network(genome.mitosis_results, std),
-        mitosis_damage=torch.normal(Tensor(genome.mitosis_damage), std).item(),
-        connection_range=torch.normal(Tensor(genome.connection_range), std).item(),
-        connection_pull_margin=torch.normal(Tensor(genome.connection_pull_margin), std).item(),
-        connection_pull_strength=torch.normal(Tensor(genome.connection_pull_strength), std).item(),
-        activation_decay=torch.normal(Tensor(genome.activation_decay), std).item(),
+        mitosis_damage=torch.normal(Tensor([genome.mitosis_damage]), std).item(),
+        connection_range=torch.normal(Tensor([genome.connection_range]), std).item(),
+        connection_pull_margin=torch.normal(Tensor([genome.connection_pull_margin]), std).item(),
+        connection_pull_strength=torch.normal(Tensor([genome.connection_pull_strength]), std).item(),
+        activation_decay=torch.normal(Tensor([genome.activation_decay]), std).item(),
     )
 
 
@@ -100,7 +133,7 @@ def init_derive_parameters_from_state():
     with torch.no_grad():
         layer4.bias.copy_(initial_output)
 
-    return nn.Sequential(layer1, nn.ReLU(), layer2, nn.ReLU(), layer3, nn.ReLU(), layer4)
+    return nn.Sequential(layer1, nn.ReLU(inplace=True), layer2, nn.ReLU(inplace=True), layer3, nn.ReLU(inplace=True), layer4)
 
 
 def init_passive_transform():
@@ -134,7 +167,7 @@ def init_passive_transform():
     # class M(nn.Module):
     #     def forward(self, x):
     #         if x.numel() == 0:
-    #             return nn.Sequential(layer1, nn.ReLU(), layer2, nn.ReLU(), layer3, nn.ReLU(), layer4)(x)
+    #             return nn.Sequential(layer1, nn.ReLU(inplace=True), layer2, nn.ReLU(inplace=True), layer3, nn.ReLU(inplace=True), layer4)(x)
     #         out = layer1(x)
     #         print(out.max().item())
     #         out = nn.functional.relu(out)
@@ -147,7 +180,7 @@ def init_passive_transform():
     #         out = layer4(out)
     #         print(out.max().item())
     #         return out
-    return nn.Sequential(layer1, nn.ReLU(), layer2, nn.ReLU(), layer3, nn.ReLU(), layer4)
+    return nn.Sequential(layer1, nn.ReLU(inplace=True), layer2, nn.ReLU(inplace=True), layer3, nn.ReLU(inplace=True), layer4)
 
 
 def init_connectivity_coefficient():
@@ -176,7 +209,7 @@ def init_connectivity_coefficient():
         layer3.bias.copy_(-1.0)
         layer4.weight.copy_(sum_matrix)
 
-    return nn.Sequential(layer1, nn.ReLU(), layer2, nn.ReLU(), layer3, nn.ReLU(), layer4)
+    return MinibatchWrapper(nn.Sequential(layer1, nn.ReLU(inplace=True), layer2, nn.ReLU(inplace=True), layer3, nn.ReLU(inplace=True), layer4), 128)
 
 
 def init_mitosis_results():
@@ -200,7 +233,7 @@ def init_mitosis_results():
         layer3.weight.copy_(hidden_matrix)
         layer4.weight.copy_(output_matrix)
 
-    return nn.Sequential(layer1, nn.ReLU(), layer2, nn.ReLU(), layer3, nn.ReLU(), layer4)
+    return nn.Sequential(layer1, nn.ReLU(inplace=True), layer2, nn.ReLU(inplace=True), layer3, nn.ReLU(inplace=True), layer4)
 
 
 def empty_linear(*shape):

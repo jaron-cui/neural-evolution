@@ -9,17 +9,18 @@ from neuron.genome import Genome
 
 
 class Specimen:
-    def __init__(self, genome: Genome, neuron_repulsion: float = 0.01):
-        self.genome = genome
+    def __init__(self, genome: Genome, neuron_repulsion: float = 0.01, device: torch.device = 'cuda'):
+        self.genome = genome.to(device)
         self.neuron_repulsion = neuron_repulsion
+        self.device = device
 
         initial_neuron_buffer_size = 16
         self.living_neuron_indices = []
         self.dead_neurons_indices = list(range(initial_neuron_buffer_size))
-        self.neurons = torch.zeros((initial_neuron_buffer_size, NEURON_DATA_DIM))
+        self.neurons = torch.zeros((initial_neuron_buffer_size, NEURON_DATA_DIM), device=device)
 
     def step(self):
-        indices = torch.tensor(self.living_neuron_indices, dtype=torch.int)
+        indices = torch.tensor(self.living_neuron_indices, dtype=torch.int, device=self.device)
         previous_neurons = self.neurons[indices]
         updated_neurons = previous_neurons.clone()
 
@@ -31,11 +32,11 @@ class Specimen:
         directions[directions.isnan()] = 0
         connectivity = self._compute_connectivity(previous_neurons, updated_neurons, distances)
         # update neuron positions
-        self._handle_physics(updated_neurons, diffs, directions, distances, connectivity)
+        self._handle_physics(updated_neurons, directions, distances, connectivity)
         # handle hormone emission, absorption, and decay
         self._handle_hormones(previous_neurons, updated_neurons, distances)
         # handle firing and passive neuron state updates
-        self._handle_state_transform_updates(previous_neurons, updated_neurons, indices, connectivity)
+        self._handle_state_transform_updates(previous_neurons, updated_neurons, connectivity)
 
         # handle cell death and division
         updated_neurons, indices = self._handle_life_and_death(updated_neurons, indices)
@@ -47,7 +48,7 @@ class Specimen:
         self.neurons[indices] = updated_neurons
 
     def _handle_state_transform_updates(
-        self, previous_neurons: Tensor, updated_neurons: Tensor, indices: Tensor, connectivity: Tensor
+        self, previous_neurons: Tensor, updated_neurons: Tensor, connectivity: Tensor
     ):
         # decay ions
         updated_neurons[:, Data.ACTIVATION_PROGRESS.value] *= self.genome.activation_decay
@@ -63,8 +64,12 @@ class Specimen:
         # process the current state of firing neurons and non-firing neurons to get state changes
         activated_state_update = self.genome.activation_transform(previous_neurons[activated, Data.STATE.value])
         passive_state_update = self.genome.passive_transform(previous_neurons[~activated, Data.STATE.value])
-        torch.tanh_(activated_state_update[:, Data.TRANSFORM_INCREMENTED.value])
-        torch.tanh_(passive_state_update[:, Data.TRANSFORM_INCREMENTED.value])
+        activated_state_update[:, Data.TRANSFORM_INCREMENTED.value] = torch.tanh(
+            activated_state_update[:, Data.TRANSFORM_INCREMENTED.value]
+        )
+        passive_state_update[:, Data.TRANSFORM_INCREMENTED.value] = torch.tanh(
+            passive_state_update[:, Data.TRANSFORM_INCREMENTED.value]
+        )
 
         # print('before', updated_neurons[~activated, Data.LATENT_STATE.value])
         # set activation warmup to 0 for neurons that have just fired
@@ -87,9 +92,12 @@ class Specimen:
         # send signals to destination neurons
         if not activated.any():
             return
-        signals = (connectivity * previous_neurons[activated, Data.SIGNAL_STRENGTH.value]).reshape(-1)
+
+        signals = connectivity * previous_neurons[:, Data.SIGNAL_STRENGTH.value]
+        signals[~activated] = 0
+
         cumulative_signals = signals.sum(dim=0)
-        updated_neurons[:, Data.ACTIVATION_PROGRESS.value] += cumulative_signals[indices]
+        updated_neurons[:, Data.ACTIVATION_PROGRESS.value] += cumulative_signals
 
     def _handle_hormones(self, previous_neurons: Tensor, updated_neurons: Tensor, distances: Tensor):
         # decay hormones
@@ -108,7 +116,9 @@ class Specimen:
 
     def _handle_life_and_death(self, updated_neurons: Tensor, indices: Tensor) -> Tuple[Tensor, Tensor]:
         # initiate apoptosis
-        dying_neurons = updated_neurons[:, Data.CELL_DAMAGE.value] >= 1
+        # if self.device == torch.device('cuda'):
+        #     torch.cuda.synchronize()
+        dying_neurons = (updated_neurons.cpu()[:, Data.CELL_DAMAGE.value] >= 1).cuda()
         self._deallocate_neurons(indices[dying_neurons])
         surviving_neurons = updated_neurons[~dying_neurons]
         surviving_indices = indices[~dying_neurons]
@@ -128,7 +138,8 @@ class Specimen:
         child_position = dividing_neurons[:, Data.POSITION.value] + split_offset
 
         dividing_neurons[:, Data.LATENT_STATE.value] = parent_latent
-        dividing_neurons[:, Data.CELL_DAMAGE.value] += F.sigmoid(torch.Tensor([self.genome.mitosis_damage]))
+        dividing_neurons[:, Data.CELL_DAMAGE.value] += F.sigmoid(
+            torch.tensor([self.genome.mitosis_damage], device=self.device))
         surviving_neurons[is_dividing] = dividing_neurons
 
         # add new cells
@@ -142,7 +153,7 @@ class Specimen:
         )
 
     def _handle_physics(
-        self, neurons: Tensor, diffs: Tensor, directions: Tensor, distances: Tensor, connectivity: Tensor
+        self, neurons: Tensor, directions: Tensor, distances: Tensor, connectivity: Tensor
     ):
 
         lo, hi = self.genome.connection_range - self.genome.connection_pull_margin, self.genome.connection_range
@@ -153,7 +164,7 @@ class Specimen:
         # print(directions.shape, attraction_strength.shape)
 
         in_range_mask = distances < NEURON_DIAMETER
-        repulsion_strength = torch.zeros_like(distances)
+        repulsion_strength = torch.zeros_like(distances, device=self.device)
         repulsion_strength[in_range_mask] = (1 - distances[in_range_mask] / NEURON_DIAMETER).relu()
         repulsion_strength *= self.neuron_repulsion
 
@@ -172,10 +183,11 @@ class Specimen:
 
         sender_states = previous_neurons[sender_indices, Data.STATE.value]
         receiver_states = previous_neurons[receiver_indices, Data.STATE.value]
+        # print('ba', sender_states.shape, receiver_states.shape)
         connection_strengths = F.sigmoid(
             self.genome.connectivity_coefficient(torch.cat([sender_states, receiver_states], dim=1))
         ).squeeze(1)
-        scoring_grid = torch.zeros_like(distances)
+        scoring_grid = torch.zeros_like(distances, device=self.device)
         # print(scoring_grid.shape, connection_strengths.shape, in_range_indices.shape)
         scoring_grid[in_range] = connection_strengths
         receptivity_scores = scoring_grid.sum(dim=0)
@@ -183,7 +195,7 @@ class Specimen:
         updated_neurons[:, Data.TOTAL_RECEPTIVITY.value] = receptivity_scores
         updated_neurons[:, Data.TOTAL_EMISSIVITY.value] = emissivity_scores
 
-        connectivity_grid = torch.full_like(distances, fill_value=float('-inf'))
+        connectivity_grid = torch.full_like(distances, fill_value=float('-inf'), device=self.device)
         connectivity_grid[in_range] = connection_strengths
         connectivity = connectivity_grid.softmax(dim=1) * scoring_grid  # (n, n)
 
@@ -201,9 +213,10 @@ class Specimen:
         :param set_parameters:
         :return: the allocated neuron indices
         """
+        positions, latent_states = positions.to(self.device), latent_states.to(self.device)
         neuron_indices = self._allocate_neurons(positions.size(0))
 
-        self.neurons[neuron_indices, :].zero_()
+        self.neurons[neuron_indices, :] = 0
         self.neurons[neuron_indices, Data.POSITION.value] = positions
         self.neurons[neuron_indices, Data.LATENT_STATE.value] = latent_states
 
@@ -224,13 +237,13 @@ class Specimen:
             while len(self.dead_neurons_indices) + extension_size < neuron_count:
                 extension_size += extension_factor * current_neuron_buffer_size
                 extension_factor *= 2
-            self.neurons = torch.cat((self.neurons, torch.zeros((extension_size, NEURON_DATA_DIM))))
+            self.neurons = torch.cat((self.neurons, torch.zeros((extension_size, NEURON_DATA_DIM), device=self.device)))
             self.dead_neurons_indices.extend(
                 range(current_neuron_buffer_size, current_neuron_buffer_size + extension_size))
         allocation = self.dead_neurons_indices[:neuron_count]
         self.dead_neurons_indices = self.dead_neurons_indices[neuron_count:]
         self.living_neuron_indices.extend(allocation)
-        return torch.tensor(allocation, dtype=torch.int)
+        return torch.tensor(allocation, dtype=torch.int, device=self.device)
 
     def _deallocate_neurons(self, indices: Tensor):
         indices = set(indices.tolist())
