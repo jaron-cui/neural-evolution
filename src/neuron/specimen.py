@@ -93,7 +93,7 @@ class Specimen:
 
     def _handle_hormones(self, previous_neurons: Tensor, updated_neurons: Tensor, distances: Tensor):
         # decay hormones
-        updated_neurons[:, Data.HORMONE_INFLUENCE.value] *= self.genome.hormone_decay
+        updated_neurons[:, Data.HORMONE_INFLUENCE.value] *= F.sigmoid(self.genome.hormone_decay)
 
         # absorb hormones
         # smooth falloff function: strength = max(log10(10 - distance * 9/range), 0)
