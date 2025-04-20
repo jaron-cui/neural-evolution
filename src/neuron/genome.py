@@ -39,7 +39,7 @@ def init_genome():
         derive_parameters_from_state=init_derive_parameters_from_state(),
         passive_transform=init_passive_transform(),
         activation_transform=init_passive_transform(),
-        hormone_decay=torch.fill(HORMONE_DIM, 0.9),
+        hormone_decay=torch.full((HORMONE_DIM,), fill_value=0.9),
         connectivity_coefficient=init_connectivity_coefficient(),
         mitosis_results=init_mitosis_results(),
         mitosis_damage=0.5,
@@ -69,7 +69,7 @@ def init_derive_parameters_from_state():
     layer2 = empty_linear(HIDDEN_DIM, HIDDEN_DIM)
     layer3 = empty_linear(HIDDEN_DIM, HIDDEN_DIM)
     layer4 = empty_linear(HIDDEN_DIM, DERIVED_PARAMETERS_SIZE)
-    with torch.no_grad:
+    with torch.no_grad():
         layer4.bias.copy_(initial_output)
 
     return nn.Sequential(layer1, nn.GELU(), layer2, nn.GELU(), layer3, nn.GELU(), layer4)
@@ -80,11 +80,11 @@ def init_passive_transform():
     # desired initial output: [0.1, -0.1, 0.02, <identity of latent>]
     assert HIDDEN_DIM >= STATE_SIZE
     input_matrix = torch.zeros((HIDDEN_DIM, STATE_SIZE))
-    input_matrix[:STATE_SIZE, :].copy_(torch.eye(STATE_SIZE))  # put an identity matrix into the top of the weights
+    input_matrix[:LATENT_DIM, :LATENT_DIM].copy_(torch.eye(LATENT_DIM))  # put an identity matrix into the top of the weights
     hidden_matrix = torch.zeros((HIDDEN_DIM, HIDDEN_DIM))
-    hidden_matrix[:STATE_SIZE, :STATE_SIZE].copy_(torch.eye(STATE_SIZE))
+    hidden_matrix[:LATENT_DIM, :LATENT_DIM].copy_(torch.eye(LATENT_DIM))
     output_matrix = torch.zeros((TRANSFORM_SIZE, HIDDEN_DIM))
-    output_matrix[-STATE_SIZE:, :STATE_SIZE].copy_(torch.eye(STATE_SIZE))
+    output_matrix[-LATENT_DIM:, :LATENT_DIM].copy_(torch.eye(LATENT_DIM))
     # activation warmup, cell damage, mitosis stage
     output_bias = torch.zeros(TRANSFORM_SIZE)
     output_bias[:3] = torch.Tensor([0.1, -0.1, 0.02])
@@ -93,7 +93,7 @@ def init_passive_transform():
     layer2 = empty_linear(HIDDEN_DIM, HIDDEN_DIM)
     layer3 = empty_linear(HIDDEN_DIM, HIDDEN_DIM)
     layer4 = empty_linear(HIDDEN_DIM, TRANSFORM_SIZE)
-    with torch.no_grad:
+    with torch.no_grad():
         layer1.weight.copy_(input_matrix)
         layer2.weight.copy_(hidden_matrix)
         layer3.weight.copy_(hidden_matrix)
@@ -122,7 +122,7 @@ def init_connectivity_coefficient():
     layer2 = empty_linear(HIDDEN_DIM, HIDDEN_DIM)
     layer3 = empty_linear(HIDDEN_DIM, HIDDEN_DIM)
     layer4 = empty_linear(HIDDEN_DIM, 1)
-    with torch.no_grad:
+    with torch.no_grad():
         layer1.weight.copy_(roll_matrix)
         layer2.weight.copy_(hidden_matrix)
         layer3.weight.copy_(add_matrix)
@@ -147,7 +147,7 @@ def init_mitosis_results():
     layer2 = empty_linear(HIDDEN_DIM, HIDDEN_DIM)
     layer3 = empty_linear(HIDDEN_DIM, HIDDEN_DIM)
     layer4 = empty_linear(HIDDEN_DIM, MITOSIS_SIZE)
-    with torch.no_grad:
+    with torch.no_grad():
         layer1.weight.copy_(copy_and_roll_matrix)
         layer2.weight.copy_(hidden_matrix)
         layer3.weight.copy_(hidden_matrix)
@@ -158,6 +158,7 @@ def init_mitosis_results():
 
 def empty_linear(*shape):
     layer = nn.Linear(*shape)
-    layer.weight.zero_()
-    layer.bias.zero_()
+    with torch.no_grad():
+        layer.weight.zero_()
+        layer.bias.zero_()
     return layer

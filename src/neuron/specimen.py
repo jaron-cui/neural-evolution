@@ -23,10 +23,11 @@ class Specimen:
         previous_neurons = self.neurons[indices]
         updated_neurons = previous_neurons.clone()
 
-        positions = previous_neurons[: Data.POSITION.value]
+        positions = previous_neurons[:, Data.POSITION.value]
         diffs = positions[:, None, :] - positions[None, :, :]  # shape: (n, n, 3)
         distances = torch.norm(diffs, dim=-1)  # shape: (n, n)
-        directions = diffs / distances
+        print(diffs.shape, distances.shape)
+        directions = diffs / distances.unsqueeze(2)
         directions[directions.isnan()] = 0
 
         connectivity = self._compute_connectivity(previous_neurons, updated_neurons, distances)
@@ -76,6 +77,8 @@ class Specimen:
         updated_neurons[~activated, Data.LATENT_STATE.value].copy_(passive_state_update[:, Data.TRANSFORM_LATENT.value])
 
         # send signals to destination neurons
+        if not activated.any():
+            return
         signals = (connectivity * previous_neurons[activated, Data.SIGNAL_STRENGTH.value]).reshape(-1)
         cumulative_signals = signals.sum(dim=0)
         updated_neurons[:, Data.ACTIVATION_PROGRESS.value].add_(cumulative_signals[indices])
@@ -86,12 +89,13 @@ class Specimen:
 
         # absorb hormones
         # smooth falloff function: strength = max(log10(10 - distance * 9/range), 0)
+        # print(distances.shape, previous_neurons[:, Data.HORMONE_RANGE.value].shape)
         hormone_strengths = torch.log10(
             10 - distances * (9 / previous_neurons[:, Data.HORMONE_RANGE.value])).relu_()  # (n, n)
-        # scaled_hormones = hormone_strengths * previous_neurons[:, None, Data.HORMONE_EMISSION.value]  # (n, n, h)
-        # hormone_absorption = scaled_hormones.sum(dim=0)
-        hormones = previous_neurons[:, None, Data.HORMONE_EMISSION.value]
-        hormone_absorption = torch.einsum("ij,ik->jk", hormone_strengths, hormones)  # (n, 10)
+        hormones = previous_neurons[:, Data.HORMONE_EMISSION.value]
+        scaled_hormones = hormone_strengths.unsqueeze(2) * hormones.unsqueeze(1)  # (n, n, h)
+        hormone_absorption = scaled_hormones.sum(dim=0)
+        # hormone_absorption = torch.einsum("ij,ik->jk", hormone_strengths, hormones)  # (n, 10)
         updated_neurons[:, Data.HORMONE_INFLUENCE.value].add_(hormone_absorption)
 
     def _handle_life_and_death(self, updated_neurons: Tensor, indices: Tensor) -> Tuple[Tensor, Tensor]:
@@ -106,16 +110,17 @@ class Specimen:
         dividing_neurons = surviving_neurons[is_dividing]
 
         mitosis_results: Tensor = self.genome.mitosis_results(dividing_neurons[:, Data.STATE.value])
-        parent_latent = mitosis_results[Data.MITOSIS_PARENT_LATENT.value]
-        child_latent = mitosis_results[Data.MITOSIS_CHILD_LATENT.value]
-        split_offset = F.normalize(mitosis_results[Data.MITOSIS_SPLIT_POSITION.value]) * (NEURON_DIAMETER / 2)
+        parent_latent = mitosis_results[:, Data.MITOSIS_PARENT_LATENT.value]
+        child_latent = mitosis_results[:, Data.MITOSIS_CHILD_LATENT.value]
+        split_offset = F.normalize(mitosis_results[:, Data.MITOSIS_SPLIT_POSITION.value]) * (NEURON_DIAMETER / 2)
+
         child_position = dividing_neurons[:, Data.POSITION.value] + split_offset
 
         dividing_neurons[:, Data.LATENT_STATE.value].copy_(parent_latent)
         child_indices = self.add_neurons(child_position, child_latent)
 
         updated_neurons = torch.cat([surviving_neurons, self.neurons[child_indices]], dim=0)
-        updated_neurons[:, Data.CELL_DAMAGE.value].sub_(F.sigmoid(self.genome.mitosis_damage))
+        updated_neurons[:, Data.CELL_DAMAGE.value].sub_(F.sigmoid(torch.Tensor([self.genome.mitosis_damage])))
 
         return (
             updated_neurons,
@@ -130,12 +135,16 @@ class Specimen:
         attraction_strength = torch.zeros_like(distances)
         attraction_strength[in_range_mask] = (distances[in_range_mask] - lo) / self.genome.connection_pull_margin
         attraction_strength.mul_(connectivity).mul_(self.genome.connection_pull_strength)
-        attraction = -directions * attraction_strength
+        # print(directions.shape, attraction_strength.shape)
 
-        repulsion = directions * NEURON_DIAMETER - diffs
-        repulsion[repulsion.dot(directions) < 0].zero_()
-        repulsion.mul_(self.neuron_repulsion / NEURON_DIAMETER)
-        cumulative_movements = repulsion.sum(dim=1) + attraction.sum(dim=1)
+        in_range_mask = distances < NEURON_DIAMETER
+        repulsion_strength = torch.zeros_like(distances)
+        repulsion_strength[in_range_mask] = (1 - distances[in_range_mask] / NEURON_DIAMETER).relu()
+        repulsion_strength.mul_(self.neuron_repulsion)
+
+        net_strength = attraction_strength + repulsion_strength
+
+        cumulative_movements = (net_strength.unsqueeze(2) * directions).sum(dim=1)
         cumulative_movement_perturbed = torch.normal(cumulative_movements, std=0.02)
         neurons[:, Data.POSITION.value].add_(cumulative_movement_perturbed)
 
@@ -150,16 +159,17 @@ class Specimen:
         receiver_states = previous_neurons[receiver_indices, Data.STATE.value]
         connection_strengths = F.sigmoid(
             self.genome.connectivity_coefficient(torch.cat([sender_states, receiver_states], dim=1))
-        )
+        ).squeeze(1)
         scoring_grid = torch.zeros_like(distances)
-        scoring_grid[in_range_indices] = connection_strengths
+        # print(scoring_grid.shape, connection_strengths.shape, in_range_indices.shape)
+        scoring_grid[in_range] = connection_strengths
         receptivity_scores = scoring_grid.sum(dim=0)
         emissivity_scores = scoring_grid.sum(dim=1)
         updated_neurons[:, Data.TOTAL_RECEPTIVITY.value] = receptivity_scores
         updated_neurons[:, Data.TOTAL_EMISSIVITY.value] = emissivity_scores
 
         connectivity_grid = torch.full_like(distances, fill_value=float('-inf'))
-        connectivity_grid[in_range_indices] = connection_strengths
+        connectivity_grid[in_range] = connection_strengths
         connectivity = connectivity_grid.softmax(dim=1)  # (n, n)
 
         return connectivity

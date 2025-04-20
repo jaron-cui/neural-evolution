@@ -82,7 +82,7 @@ class Data(Enum):
     SIGNAL_STRENGTH = _get_indexing(_Properties.SIGNAL_STRENGTH)
     # - hormone emission
     HORMONE_EMISSION = _get_indexing(_Properties.HORMONE_EMISSION)
-    HORMONE_RANGE = _get_indexing(_Properties.HORMONE_EMISSION)
+    HORMONE_RANGE = _get_indexing(_Properties.HORMONE_RANGE)
 
     # State Parameters -------------------
     # - incremented/decremented parameters
