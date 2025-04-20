@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+import copy
 import torch
 from torch import Tensor, nn
 
@@ -33,13 +34,40 @@ class Genome:
     activation_decay: float
 
 
+def mutate_genome(genome: Genome) -> Genome:
+    std = 0.01
+    torch.normal(genome.pluripotent_latent_state, std)
+    return Genome(
+        pluripotent_latent_state=torch.normal(genome.pluripotent_latent_state, std),
+        derive_parameters_from_state=mutate_network(genome.derive_parameters_from_state, std),
+        passive_transform=mutate_network(genome.passive_transform, std),
+        activation_transform=mutate_network(genome.activation_transform, std),
+        hormone_decay=torch.normal(genome.hormone_decay, std),
+        connectivity_coefficient=mutate_network(genome.connectivity_coefficient, std),
+        mitosis_results=mutate_network(genome.mitosis_results, std),
+        mitosis_damage=torch.normal(Tensor(genome.mitosis_damage), std).item(),
+        connection_range=torch.normal(Tensor(genome.connection_range), std).item(),
+        connection_pull_margin=torch.normal(Tensor(genome.connection_pull_margin), std).item(),
+        connection_pull_strength=torch.normal(Tensor(genome.connection_pull_strength), std).item(),
+        activation_decay=torch.normal(Tensor(genome.activation_decay), std).item(),
+    )
+
+
+def mutate_network(network: nn.Module, std: float) -> nn.Module:
+    cloned = copy.deepcopy(network)
+    with torch.no_grad():
+        for parameter in cloned.parameters():
+            parameter.data.copy_(torch.normal(parameter.data, std))
+    return cloned
+
+
 def init_genome():
     genome = Genome(
         pluripotent_latent_state=init_pluripotent_latent_state(),
         derive_parameters_from_state=init_derive_parameters_from_state(),
         passive_transform=init_passive_transform(),
         activation_transform=init_passive_transform(),
-        hormone_decay=torch.full((HORMONE_DIM,), fill_value=0.9),
+        hormone_decay=torch.full((HORMONE_DIM,), fill_value=2.0),
         connectivity_coefficient=init_connectivity_coefficient(),
         mitosis_results=init_mitosis_results(),
         mitosis_damage=0.5,
