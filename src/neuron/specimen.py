@@ -47,6 +47,8 @@ class Specimen:
         # update derived parameters
         derived_parameters = self.genome.derive_parameters_from_state(updated_neurons[:, Data.STATE.value])
         updated_neurons[:, Data.DERIVED_PARAMETERS.value] = derived_parameters
+        # if we don't normalize hormone emission, we get a positive feedback loop...
+        updated_neurons[:, Data.HORMONE_EMISSION.value] = F.normalize(updated_neurons[:, Data.HORMONE_EMISSION.value], dim=1)
 
         self.neurons[indices] = updated_neurons
 
@@ -108,7 +110,7 @@ class Specimen:
 
     def _handle_hormones(self, previous_neurons: Tensor, updated_neurons: Tensor, distances: Tensor):
         # decay hormones
-        updated_neurons[:, Data.HORMONE_INFLUENCE.value] *= F.sigmoid(self.genome.hormone_decay)
+        updated_neurons[:, Data.HORMONE_INFLUENCE.value] = updated_neurons[:, Data.HORMONE_INFLUENCE.value] * F.sigmoid(self.genome.hormone_decay)
 
         # absorb hormones
         # smooth falloff function: strength = max(log10(10 - distance * 9/range), 0)
