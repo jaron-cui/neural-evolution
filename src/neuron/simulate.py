@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from neuron.genome import Genome, mutate_genome, init_genome
+from neuron.genome import Genome, mutate_genome, init_genome, InitialNeuronConfiguration
 from neuron.specimen import Specimen
 
 
@@ -47,22 +47,23 @@ def reproduce(genomes: List[Genome], target_count: int) -> List[Genome]:
 
 
 def create_specimen(genome: Genome) -> Specimen:
-    specimen = Specimen(genome)
-    specimen.add_neurons(
-        torch.Tensor([[20, 20, 0], [22, 20, 0]]),
-        genome.pluripotent_latent_state.unsqueeze(0).repeat((2, 1))
-    )
+    specimen = Specimen(genome, [
+        InitialNeuronConfiguration(None, torch.tensor([20.0, 20.0, 0.0])),
+        InitialNeuronConfiguration(None, torch.tensor([22.0, 20.0, 0.0]))
+    ])
     return specimen
 
 
 def main():
     generation_size = 100
     population = reproduce([init_genome()], generation_size)
-    for generation in range(10):
+    for generation in range(1):
+        torch.cuda.empty_cache()
         results = simulate_generation(population, survival_rate=0.1, iterations=600)
         scores = [score for _, score in results]
         population = reproduce([genome for genome, _ in results], generation_size)
         print(f'Average score for generation {generation} survivors: {sum(scores) / len(scores)}')
+    torch.save(population[0], '../../genome.pt')
 
 
 if __name__ == '__main__':
