@@ -182,7 +182,7 @@ class Specimen:
         repulsion_strength[in_range_mask] = (1 - distances[in_range_mask] / NEURON_DIAMETER).clamp_min(0)
         repulsion_strength *= self.neuron_repulsion
 
-        net_strength = attraction_strength + repulsion_strength
+        net_strength = -attraction_strength + repulsion_strength
 
         cumulative_movements = (net_strength.unsqueeze(2) * directions).sum(dim=1)
         cumulative_movement_perturbed = torch.normal(cumulative_movements, std=0.001)
