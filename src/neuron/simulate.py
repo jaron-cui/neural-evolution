@@ -6,6 +6,8 @@ from tqdm import tqdm
 
 from neuron.genome import Genome, mutate_genome, init_genome, InitialNeuronConfiguration
 from neuron.specimen import Specimen
+from utils import TrainingRecord
+
 
 # import modal
 
@@ -75,18 +77,51 @@ def create_specimen(genome: Genome) -> Specimen:
     return specimen
 
 
+def train(
+    generations: int,
+    generation_size: int,
+    specimen_lifespan: int,
+    save_every: int = 1,
+    resume_training_run_from: str = None
+):
+    if resume_training_run_from is None:
+        training_record = TrainingRecord('checkpoints')
+        population = reproduce([init_genome()], generation_size)
+    else:
+        training_record, survivors = TrainingRecord.resume_from(resume_training_run_from)
+        population = reproduce([survivors], generation_size)
+
+    torch.set_grad_enabled(False)
+    for generation in range(training_record.last_epoch + 1, training_record.last_epoch + 1 + generations):
+        torch.cuda.empty_cache()
+        results = simulate_generation(population, survival_rate=0.1, iterations=specimen_lifespan)
+        scores = [score for _, score in results]
+        survivors = [genome for genome, _ in results]
+        population = reproduce(survivors, generation_size)
+        print(f'Average score for generation {generation} survivors: {sum(scores) / len(scores)}')
+        if generation % save_every == 0:
+            training_record.save_checkpoint(survivors, generation)
+
+
 # @app.local_entrypoint()
 def main():
-    torch.set_grad_enabled(False)
-    generation_size = 100
-    population = reproduce([init_genome()], generation_size)
-    for generation in range(10):
-        torch.cuda.empty_cache()
-        results = simulate_generation(population, survival_rate=0.1, iterations=600)
-        scores = [score for _, score in results]
-        population = reproduce([genome for genome, _ in results], generation_size)
-        print(f'Average score for generation {generation} survivors: {sum(scores) / len(scores)}')
-    population[0].save('genome.pt')
+    train(10, 100, 600, resume_training_run_from='checkpoints/2025-05-09/16-28-04')
+    # training_record = TrainingRecord('checkpoints')
+    # save_every = 1
+    #
+    # torch.set_grad_enabled(False)
+    # generation_size = 100
+    # population = reproduce([init_genome()], generation_size)
+    # for generation in range(10):
+    #     torch.cuda.empty_cache()
+    #     results = simulate_generation(population, survival_rate=0.1, iterations=600)
+    #     scores = [score for _, score in results]
+    #     survivors = [genome for genome, _ in results]
+    #     population = reproduce(survivors, generation_size)
+    #     print(f'Average score for generation {generation} survivors: {sum(scores) / len(scores)}')
+    #     if generation % save_every == 0:
+    #         training_record.save_checkpoint(survivors, generation)
+    # population[0].save('genome.pt')
 
 
 if __name__ == '__main__':
