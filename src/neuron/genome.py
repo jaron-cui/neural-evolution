@@ -104,7 +104,7 @@ class MinibatchWrapper(nn.Module):
 
 
 def mutate_genome(genome: Genome) -> Genome:
-    std = 0.01
+    std = 0.001
     torch.normal(genome.pluripotent_latent_state, std)
     return Genome(
         pluripotent_latent_state=torch.normal(genome.pluripotent_latent_state, std),
