@@ -1,16 +1,22 @@
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Tuple, List, Iterable
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor
 
 from neuron.data_structure import NEURON_DATA_DIM, Data, NEURON_DIAMETER
-from neuron.genome import Genome
+from neuron.genome import Genome, InitialNeuronConfiguration
 
 
 class Specimen:
-    def __init__(self, genome: Genome, neuron_repulsion: float = 0.01, device: torch.device = 'cuda'):
+    def __init__(
+        self,
+        genome: Genome,
+        start_configuration: Iterable[InitialNeuronConfiguration],
+        neuron_repulsion: float = 0.01,
+        device: torch.device = 'cuda'
+    ):
         self.genome = genome.to(device)
         self.neuron_repulsion = neuron_repulsion
         self.device = device
@@ -19,7 +25,24 @@ class Specimen:
         initial_neuron_buffer_size = 16
         self.living_neuron_indices = []
         self.dead_neurons_indices = list(range(initial_neuron_buffer_size))
+        self.io_labels = torch.zeros(initial_neuron_buffer_size, device=device, dtype=torch.uint8)
+        self.io_label_to_int = {variant: i + 1 for i, variant in enumerate(genome.differentiated_latent_states.keys())}
         self.neurons = torch.zeros((initial_neuron_buffer_size, NEURON_DATA_DIM), device=device)
+        self._init_neurons(start_configuration)
+
+    def _init_neurons(self, start_configuration: Iterable[InitialNeuronConfiguration]):
+        positions, latents = [], []
+        variants = []
+        for config in start_configuration:
+            if config.differentiation is None:
+                latent = self.genome.pluripotent_latent_state
+            else:
+                latent = self.genome.differentiated_latent_states[config.differentiation]
+
+            positions.append(config.start_position.clone())
+            latents.append(latent.clone())
+            variants.append(config.differentiation)
+        self.add_neurons(torch.stack(positions), torch.stack(latents), variants=variants)
 
     def step(self):
         self.log = StepLog()
@@ -215,7 +238,13 @@ class Specimen:
 
         return connectivity
 
-    def add_neurons(self, positions: Tensor, latent_states: Tensor, set_parameters: bool = True) -> Tensor:
+    def add_neurons(
+        self,
+        positions: Tensor,
+        latent_states: Tensor,
+        set_parameters: bool = True,
+        variants: List[str] = None
+    ) -> Tensor:
         """
 
 
@@ -225,14 +254,23 @@ class Specimen:
         :param positions:
         :param latent_states:
         :param set_parameters:
+        :param variants:
         :return: the allocated neuron indices
         """
+        if variants is None:
+            variants = [None] * positions.size(0)
+
         positions, latent_states = positions.to(self.device), latent_states.to(self.device)
         neuron_indices = self._allocate_neurons(positions.size(0))
 
         self.neurons[neuron_indices, :] = 0
         self.neurons[neuron_indices, Data.POSITION.value] = positions
         self.neurons[neuron_indices, Data.LATENT_STATE.value] = latent_states
+        self.io_labels[neuron_indices] = torch.tensor(
+            [0 if label is None else self.io_label_to_int[label] for label in variants],
+            dtype=torch.uint8,
+            device=self.device
+        )
 
         if set_parameters:
             parameters = self.genome.derive_parameters_from_state(self.neurons[neuron_indices, Data.STATE.value])
@@ -254,6 +292,10 @@ class Specimen:
             self.neurons = torch.cat((self.neurons, torch.zeros((extension_size, NEURON_DATA_DIM), device=self.device)))
             self.dead_neurons_indices.extend(
                 range(current_neuron_buffer_size, current_neuron_buffer_size + extension_size))
+            self.io_labels = torch.cat((
+                self.io_labels,
+                torch.zeros(extension_size, device=self.device, dtype=torch.uint8)
+            ))
         allocation = self.dead_neurons_indices[:neuron_count]
         self.dead_neurons_indices = self.dead_neurons_indices[neuron_count:]
         self.living_neuron_indices.extend(allocation)

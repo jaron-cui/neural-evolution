@@ -2,6 +2,8 @@ import math
 from dataclasses import dataclass
 
 import copy
+from typing import Dict, Iterable, Optional
+
 import torch
 from torch import Tensor, nn
 
@@ -10,9 +12,16 @@ from neuron.data_structure import LATENT_DIM, STATE_SIZE, HIDDEN_DIM, DERIVED_PA
 
 
 @dataclass
+class InitialNeuronConfiguration:
+    differentiation: Optional[str]
+    start_position: Tensor
+
+
+@dataclass
 class Genome:
     # initial latent state for the first neuron(s)
     pluripotent_latent_state: Tensor
+    differentiated_latent_states: Dict[str, Tensor]
     # takes in internal state, outputs derived parameters
     derive_parameters_from_state: nn.Module
     # takes in internal state, outputs new latent state and state updates
@@ -37,6 +46,7 @@ class Genome:
     def to(self, device: torch.device):
         return Genome(
             self.pluripotent_latent_state.to(device),
+            {key: value.to(device) for key, value in self.differentiated_latent_states.items()},
             self.derive_parameters_from_state.to(device),
             self.passive_transform.to(device),
             self.activation_transform.to(device),
@@ -108,6 +118,8 @@ def mutate_genome(genome: Genome) -> Genome:
     torch.normal(genome.pluripotent_latent_state, std)
     return Genome(
         pluripotent_latent_state=torch.normal(genome.pluripotent_latent_state, std),
+        differentiated_latent_states={
+            key: torch.normal(value, std) for key, value in genome.differentiated_latent_states.items()},
         derive_parameters_from_state=mutate_network(genome.derive_parameters_from_state, std),
         passive_transform=mutate_network(genome.passive_transform, std),
         activation_transform=mutate_network(genome.activation_transform, std),
@@ -130,9 +142,19 @@ def mutate_network(network: nn.Module, std: float) -> nn.Module:
     return cloned
 
 
-def init_genome():
+def init_start_configuration():
+    return [InitialNeuronConfiguration(None, torch.tensor([0.0, 0.0, 0.0]))]
+
+
+def init_genome(differentiations: Iterable[str] = None):
+    if differentiations is None:
+        differentiations = []
+    initial_latent_state = init_pluripotent_latent_state()
     genome = Genome(
-        pluripotent_latent_state=init_pluripotent_latent_state(),
+        pluripotent_latent_state=initial_latent_state,
+        differentiated_latent_states={
+            differentiation: initial_latent_state.clone() for differentiation in differentiations
+        },
         derive_parameters_from_state=init_derive_parameters_from_state(),
         passive_transform=init_passive_transform(),
         activation_transform=init_passive_transform(),
