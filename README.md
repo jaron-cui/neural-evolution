@@ -11,7 +11,7 @@ model that behaves much more like real neuron clumps?
 ## WIP Notes
 
 ### Simulation Objectives
-1. **Maintain stable neuron population size**
+1. **Maintain stable neuron population size** ✓
 
 2. Act as a signal wire
 3. Act as two independent signal wires
