@@ -57,6 +57,8 @@ class Specimen:
         directions = diffs / distances.unsqueeze(2)
         directions[directions.isnan()] = 0
         connectivity = self._compute_connectivity(previous_neurons, updated_neurons, distances)
+        self.log.neuron_positions = previous_neurons[:, Data.POSITION.value]
+        self.log.connectivity = connectivity
         # update neuron positions
         self._handle_physics(updated_neurons, directions, distances, connectivity)
         # handle hormone emission, absorption, and decay
@@ -312,3 +314,5 @@ class StepLog:
         self.neuron_death_count = 0
         self.neuron_creation_count = 0
         self.neuron_count = 0
+        self.neuron_positions = None
+        self.connectivity = None

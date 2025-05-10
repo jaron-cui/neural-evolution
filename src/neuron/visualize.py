@@ -44,6 +44,7 @@ class Plotter:
         # self.plotter.add_axes()
         # self.plotter.show_grid(color='gray')  # Culling=False makes grid always visible
         self.plotter.show(auto_close=False)
+        # self.plotter.enable_depth_peeling()
 
     def close_window(self):
         pass
@@ -53,27 +54,48 @@ class Plotter:
         coordinates: np.ndarray,
         point_colors: np.ndarray,
         # connection_strengths: np.ndarray,
-        # connection_colors: np.ndarray
+        connection_colors: np.ndarray
     ):
         point_cloud_mesh = pv.PolyData(coordinates)
-        point_cloud_mesh.point_data['frame_colors'] = point_colors
-        point_cloud_mesh.active_scalars_name = 'frame_colors'  # Tell plotter which scalars to use
+        point_cloud_mesh.point_data['neuron_colors'] = point_colors
+        point_cloud_mesh.active_scalars_name = 'neuron_colors'  # Tell plotter which scalars to use
+        lines_mesh = pv.PolyData(coordinates, lines=_line_segment_indices(coordinates.shape[0]))
+        lines_mesh['line_colors'] = connection_colors
+        # lines_mesh.active_scalars_name = 'line_colors'  # Tell plotter which scalars to use
         if self.points_actor is None:
             self.points_actor = self.plotter.add_mesh(
                 point_cloud_mesh,
                 style='points',  # 'points' or 'spheres'
                 render_points_as_spheres=True,  # Looks better
                 point_size=10,
-                color='lightblue',  # Default color if no scalars
+                scalars='neuron_colors',
                 name='dynamic_points'
-           )
+            )
+            self.lines_actor = self.plotter.add_mesh(
+                lines_mesh,
+                scalars='line_colors',
+                line_width=2,
+                name='dynamic_lines',
+                rgba=True
+            )
         else:
             self.points_actor.mapper.dataset = point_cloud_mesh
-            self.points_actor.mapper.scalar_visibility = True  # Ensure scalars are used for coloring
+            # self.points_actor.mapper.scalar_visibility = True  # Ensure scalars are used for coloring
             self.points_actor.mapper.SetScalarModeToUsePointData()  # Use point data for coloring
+
+            self.lines_actor.mapper.dataset = lines_mesh
+            # self.lines_actor.mapper.SetScalarModeToUsePointData()  # Use point data for coloring
 
         self.plotter.render()
 
+
+def _line_segment_indices(m: int) -> np.ndarray:
+    temp = np.expand_dims(np.arange(m, dtype=int), 1).repeat(m, axis=1)
+    i = temp.flatten()
+    j = temp.T.flatten()
+    segments = np.stack([np.full_like(i, 2), i, j]).T
+    lines = segments.flatten()
+    return lines
 
 
 def draw_specimen(specimen: Specimen):
@@ -185,9 +207,21 @@ start = time.time()
 
 def step():
     specimen.step()
-    neurons = specimen.neurons[specimen.living_neuron_indices]
-    coordinates = neurons[:, Data.POSITION.value].detach().cpu().numpy() / 10
-    plotter.set_state(coordinates, (np.random.rand(neurons.size(0), 3) * 255).astype(np.uint8))
+    # neurons = specimen.neurons[specimen.living_neuron_indices]
+    coordinates = specimen.log.neuron_positions.detach().cpu().numpy() / 10
+
+    connectivity = specimen.log.connectivity.detach().cpu().numpy().flatten()
+    connection_opacity = np.clip(connectivity.flatten() * 10, 0.0, 1.0)
+    connection_opacity[np.argsort(connectivity)[:-connection_opacity.shape[0] // 10]] = 0
+    connection_color = np.zeros((connectivity.shape[0], 4))
+    connection_color[:] = np.array([0.6, 0.6, 0.85, 0.0])
+    connection_color[:, -1] = connection_opacity
+
+    plotter.set_state(
+        coordinates,
+        (np.random.rand(coordinates.shape[0], 3) * 255).astype(np.uint8),
+        connection_color
+    )
 # quit = threading.Event()
 # keyboard.add_hotkey(' ', step)
 # keyboard.add_hotkey('q', lambda: quit.set())
