@@ -57,14 +57,15 @@ class Specimen:
         directions = diffs / distances.unsqueeze(2)
         directions[directions.isnan()] = 0
         connectivity = self._compute_connectivity(previous_neurons, updated_neurons, distances)
-        self.log.neuron_positions = previous_neurons[:, Data.POSITION.value]
-        self.log.connectivity = connectivity
         # update neuron positions
         self._handle_physics(updated_neurons, directions, distances, connectivity)
         # handle hormone emission, absorption, and decay
         self._handle_hormones(previous_neurons, updated_neurons, distances)
         # handle firing and passive neuron state updates
         self._handle_state_transform_updates(previous_neurons, updated_neurons, connectivity)
+
+        self.log.neuron_positions = previous_neurons[:, Data.POSITION.value]
+        self.log.connectivity = connectivity
 
         # handle cell death and division
         updated_neurons, indices = self._handle_life_and_death(updated_neurons, indices)
@@ -92,6 +93,7 @@ class Specimen:
         )
         activation_ready = updated_neurons[:, Data.ACTIVATION_WARMUP.value] >= 1
         activated = activation_threshold_reached & activation_ready
+        self.log.activations = activated
 
         # process the current state of firing neurons and non-firing neurons to get state changes
         activated_state_update = self.genome.activation_transform(previous_neurons[activated, Data.STATE.value])
@@ -316,3 +318,4 @@ class StepLog:
         self.neuron_count = 0
         self.neuron_positions = None
         self.connectivity = None
+        self.activations = None

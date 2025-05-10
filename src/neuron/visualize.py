@@ -57,8 +57,8 @@ class Plotter:
         connection_colors: np.ndarray
     ):
         point_cloud_mesh = pv.PolyData(coordinates)
-        point_cloud_mesh.point_data['neuron_colors'] = point_colors
-        point_cloud_mesh.active_scalars_name = 'neuron_colors'  # Tell plotter which scalars to use
+        point_cloud_mesh['neuron_colors'] = point_colors
+        # point_cloud_mesh.active_scalars_name = 'neuron_colors'  # Tell plotter which scalars to use
         lines_mesh = pv.PolyData(coordinates, lines=_line_segment_indices(coordinates.shape[0]))
         lines_mesh['line_colors'] = connection_colors
         # lines_mesh.active_scalars_name = 'line_colors'  # Tell plotter which scalars to use
@@ -69,19 +69,20 @@ class Plotter:
                 render_points_as_spheres=True,  # Looks better
                 point_size=10,
                 scalars='neuron_colors',
-                name='dynamic_points'
+                name='dynamic_points',
+                show_scalar_bar=False
             )
             self.lines_actor = self.plotter.add_mesh(
                 lines_mesh,
                 scalars='line_colors',
-                line_width=2,
+                line_width=1,
                 name='dynamic_lines',
                 rgba=True
             )
         else:
             self.points_actor.mapper.dataset = point_cloud_mesh
             # self.points_actor.mapper.scalar_visibility = True  # Ensure scalars are used for coloring
-            self.points_actor.mapper.SetScalarModeToUsePointData()  # Use point data for coloring
+            # self.points_actor.mapper.SetScalarModeToUsePointData()  # Use point data for coloring
 
             self.lines_actor.mapper.dataset = lines_mesh
             # self.lines_actor.mapper.SetScalarModeToUsePointData()  # Use point data for coloring
@@ -209,12 +210,22 @@ def step():
     specimen.step()
     # neurons = specimen.neurons[specimen.living_neuron_indices]
     coordinates = specimen.log.neuron_positions.detach().cpu().numpy() / 10
+    activations = specimen.log.activations.detach().cpu().numpy()
+    neuron_color = np.zeros((coordinates.shape[0], 3))
+    neuron_color[:] = np.array([0.1, 0.1, 1.0])
+    # print(activations.shape, neuron_color.shape)
+    neuron_color[activations] = np.array([0.1, 1.0, 0.1])
+
+    activations_matrix = np.zeros((coordinates.shape[0], coordinates.shape[0]), dtype=np.bool)
+    activations_matrix[activations] = True
 
     connectivity = specimen.log.connectivity.detach().cpu().numpy().flatten()
-    connection_opacity = np.clip(connectivity.flatten() * 10, 0.0, 1.0)
-    connection_opacity[np.argsort(connectivity)[:-connection_opacity.shape[0] // 10]] = 0
+    connection_opacity = np.clip(connectivity.flatten() * 2, 0.0, 1.0)
+    # connection_opacity[np.argsort(connectivity)[:-connection_opacity.shape[0] // 10]] = 0  # cull bottom 90% connections
     connection_color = np.zeros((connectivity.shape[0], 4))
     connection_color[:] = np.array([0.6, 0.6, 0.85, 0.0])
+    # print(activations.shape, connection_color.shape)
+    connection_color[activations_matrix.flatten()] = np.array([0.1, 1.0, 0.1, 0.0])
     connection_color[:, -1] = connection_opacity
 
     plotter.set_state(
