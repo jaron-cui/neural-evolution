@@ -1,0 +1,7 @@
+--extra-index-url https://download.pytorch.org/whl/cu118
+torch
+numpy
+tqdm
+matplotlib
+pyvista
+opencv-python

@@ -10,6 +10,13 @@ model that behaves much more like real neuron clumps?
 
 ## WIP Notes
 
+### Setup
+```
+conda create --name=neural-evolution python=3.13
+pip install -r requirements.txt
+```
+
+
 ### Simulation Objectives
 1. **Maintain stable neuron population size** ✓
 
