@@ -1,3 +1,5 @@
+import logging
+import sys
 from typing import List, Tuple
 
 import numpy as np
@@ -89,23 +91,25 @@ def train(
         population = reproduce([init_genome()], generation_size)
     else:
         training_record, survivors = TrainingRecord.resume_from(resume_training_run_from)
-        population = reproduce([survivors], generation_size)
+        population = reproduce(survivors, generation_size)
+        logging.info(f'Resuming evolution from `{resume_training_run_from}` for {generations} additional generations.')
 
     torch.set_grad_enabled(False)
     for generation in range(training_record.last_epoch + 1, training_record.last_epoch + 1 + generations):
         torch.cuda.empty_cache()
+        logging.info(f'Simulating generation {generation} with {len(population)} specimens.')
         results = simulate_generation(population, survival_rate=0.1, iterations=specimen_lifespan)
         scores = [score for _, score in results]
         survivors = [genome for genome, _ in results]
         population = reproduce(survivors, generation_size)
-        print(f'Average score for generation {generation} survivors: {sum(scores) / len(scores)}')
+        logging.info(f'Average score for generation {generation} survivors: {sum(scores) / len(scores)}')
         if generation % save_every == 0:
             training_record.save_checkpoint(survivors, generation)
 
 
 # @app.local_entrypoint()
 def main():
-    train(10, 100, 600, resume_training_run_from='checkpoints/2025-05-09/16-28-04')
+    train(20, 100, 600, resume_training_run_from='checkpoints/2025-05-09/19-36-11')
     # training_record = TrainingRecord('checkpoints')
     # save_every = 1
     #
