@@ -86,7 +86,7 @@ class Specimen:
         self, previous_neurons: Tensor, updated_neurons: Tensor, connectivity: Tensor, indices: Tensor
     ):
         # decay ions
-        updated_neurons[:, Data.ACTIVATION_PROGRESS.value] *= self.genome.activation_decay
+        updated_neurons[:, Data.ACTIVATION_PROGRESS.value] *= F.sigmoid(Tensor([self.genome.activation_decay])).item()
 
         # locate neurons that are ready to fire signals - ion threshold reached and firing warmup completed
         activation_threshold_reached = (
