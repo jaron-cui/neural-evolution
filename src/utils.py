@@ -1,12 +1,14 @@
 import datetime
-import io
+import logging
 import os
 import re
-
-import logging
-import torch
 from pathlib import Path
 from typing import Any, List, Tuple
+
+import torch
+
+
+logging.basicConfig(level=logging.INFO)
 
 
 class TrainingRecord:
@@ -27,6 +29,7 @@ class TrainingRecord:
         self.run_sub_folder = self.dated_sub_folder / run_sub_folder_name
         self.last_epoch = last_epoch
 
+        os.makedirs(self.run_sub_folder, exist_ok=True)
         file_handler = logging.FileHandler(self.run_sub_folder / 'log.txt')
         file_handler.setLevel(logging.DEBUG)
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -35,7 +38,6 @@ class TrainingRecord:
 
     def save_checkpoint(self, checkpoint: List[Any], epoch: int):
         checkpoint_path = self.run_sub_folder / f'generation_{epoch}_survivors.pt'
-        os.makedirs(self.run_sub_folder, exist_ok=True)
         torch.save(checkpoint, checkpoint_path)
         logging.info(f'Saved a genome of a specimen from generation {epoch} at `{checkpoint_path}`.')
 
@@ -56,33 +58,3 @@ class TrainingRecord:
             record.run_sub_folder / f'generation_{record.last_epoch}_survivors.pt',
             weights_only=False
         )
-
-#
-# # Taken from https://github.com/tqdm/tqdm/issues/313#issuecomment-267959111
-# class TqdmToLogger(io.StringIO):
-#     """
-#     Redirect tqdm output to a logger, simulating in-place updates.
-#     """
-#     def __init__(self, logger, level=logging.INFO):
-#         super().__init__()
-#         self.logger = logger
-#         self.level = level
-#         self._buffer = ''
-#
-#     def write(self, buf):
-#         # Accumulate buffer
-#         self._buffer += buf
-#         # If there's a carriage return, treat it as an in-place update
-#         if '\r' in buf or '\n' in buf:
-#             self.flush()
-#
-#     def flush(self):
-#         line = self._buffer.strip('\r\n')
-#         if line:
-#             self.logger.log(self.level, line)
-#         self._buffer = ''
-#
-#
-# tqdm_logging = TqdmToLogger(logging.getLogger())
-logging.basicConfig(level=logging.INFO)
-
