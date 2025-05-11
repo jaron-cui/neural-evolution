@@ -6,6 +6,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from neuron.fitness import TargetNeuronCountCriteria, NeuronSurvivalCriteria, SignalMatchingCriteria, \
+    TargetActivationRateCriteria
 from neuron.genome import Genome, mutate_genome, init_genome, InitialNeuronConfiguration
 from neuron.specimen import Specimen
 from utils import TrainingRecord
@@ -48,17 +50,23 @@ def simulate_generation(
 def simulate_run(specimen: Specimen, iterations: int) -> float:
     cancer_threshold = 200
     optimal_neuron_count = 100
+    pattern = [150, 170, 180, 185, 200, 250, 260, 265, 275, 290, 300, 310, 390, 450, 460, 480, 500, 550, 555, 560, 565, 575, 590]
 
-    score = 0
+    criteria = [
+        TargetNeuronCountCriteria(optimal_neuron_count),
+        NeuronSurvivalCriteria(optimal_neuron_count),
+        SignalMatchingCriteria(pattern, 1),
+        TargetActivationRateCriteria(10.0)
+    ]
     for i in range(iterations):
+        if i in pattern:
+            specimen.stimulate_input_neurons({0: 1.0})
         specimen.step()
-        # closeness to desired neuron count
-        score += 1 - (abs(len(specimen.living_neuron_indices) - optimal_neuron_count) / optimal_neuron_count)
-        # penalize neuron deaths
-        score -= (specimen.log.neuron_death_count / optimal_neuron_count)**2 * 2
+        for criterion in criteria:
+            criterion.accumulate(specimen)
         if specimen.log.neuron_count > cancer_threshold or specimen.log.neuron_count == 0:
-            return score
-    return score
+            break
+    return sum([criterion.calculate_fitness_score() for criterion in criteria])
 
 
 def reproduce(genomes: List[Genome], target_count: int) -> List[Genome]:
@@ -73,8 +81,8 @@ def reproduce(genomes: List[Genome], target_count: int) -> List[Genome]:
 
 def create_specimen(genome: Genome) -> Specimen:
     specimen = Specimen(genome, [
-        InitialNeuronConfiguration(None, torch.tensor([20.0, 20.0, 0.0])),
-        InitialNeuronConfiguration(None, torch.tensor([22.0, 20.0, 0.0]))
+        InitialNeuronConfiguration('input', torch.tensor([20.0, 20.0, 0.0])),
+        InitialNeuronConfiguration('output', torch.tensor([26.0, 20.0, 0.0]))
     ])
     return specimen
 
@@ -88,7 +96,7 @@ def train(
 ):
     if resume_training_run_from is None:
         training_record = TrainingRecord('checkpoints')
-        population = reproduce([init_genome()], generation_size)
+        population = reproduce([init_genome(['input', 'output'])], generation_size)
     else:
         training_record, survivors = TrainingRecord.resume_from(resume_training_run_from)
         population = reproduce(survivors, generation_size)
@@ -109,7 +117,7 @@ def train(
 
 # @app.local_entrypoint()
 def main():
-    train(20, 100, 600, resume_training_run_from='checkpoints/2025-05-09/19-36-11')
+    train(60, 100, 600, resume_training_run_from='checkpoints/2025-05-11/01-41-17')
     # training_record = TrainingRecord('checkpoints')
     # save_every = 1
     #
