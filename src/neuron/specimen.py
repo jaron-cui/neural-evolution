@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Tuple, List, Iterable
+from typing import Tuple, List, Iterable, Dict
 
 import torch
 import torch.nn.functional as F
@@ -25,6 +25,7 @@ class Specimen:
         initial_neuron_buffer_size = 16
         self.living_neuron_indices = []
         self.dead_neurons_indices = list(range(initial_neuron_buffer_size))
+        self.io_index_map = {}
         self.io_labels = torch.zeros(initial_neuron_buffer_size, device=device, dtype=torch.uint8)
         self.io_label_to_int = {variant: i + 1 for i, variant in enumerate(genome.differentiated_latent_states.keys())}
         self.neurons = torch.zeros((initial_neuron_buffer_size, NEURON_DATA_DIM), device=device)
@@ -42,7 +43,8 @@ class Specimen:
             positions.append(config.start_position.clone())
             latents.append(latent.clone())
             variants.append(config.differentiation)
-        self.add_neurons(torch.stack(positions), torch.stack(latents), variants=variants)
+        allocated_indices = self.add_neurons(torch.stack(positions), torch.stack(latents), variants=variants)
+        self.io_index_map = {i: index.item() for i, index in enumerate(allocated_indices)}
 
     def step(self):
         self.log = StepLog()
@@ -62,7 +64,7 @@ class Specimen:
         # handle hormone emission, absorption, and decay
         self._handle_hormones(previous_neurons, updated_neurons, distances)
         # handle firing and passive neuron state updates
-        self._handle_state_transform_updates(previous_neurons, updated_neurons, connectivity)
+        self._handle_state_transform_updates(previous_neurons, updated_neurons, connectivity, indices)
 
         self.log.neuron_positions = previous_neurons[:, Data.POSITION.value]
         self.log.connectivity = connectivity
@@ -81,7 +83,7 @@ class Specimen:
         self.log.neuron_count = len(self.living_neuron_indices)
 
     def _handle_state_transform_updates(
-        self, previous_neurons: Tensor, updated_neurons: Tensor, connectivity: Tensor
+        self, previous_neurons: Tensor, updated_neurons: Tensor, connectivity: Tensor, indices: Tensor
     ):
         # decay ions
         updated_neurons[:, Data.ACTIVATION_PROGRESS.value] *= self.genome.activation_decay
@@ -94,6 +96,10 @@ class Specimen:
         activation_ready = updated_neurons[:, Data.ACTIVATION_WARMUP.value] >= 1
         activated = activation_threshold_reached & activation_ready
         self.log.activations = activated
+        absolute_activation_mask = torch.zeros((self.neurons.size(0),), dtype=torch.bool)
+        absolute_activation_mask[indices[activated]] = True
+        self.log.io_activations = dict(zip(
+            self.io_index_map.keys(), absolute_activation_mask[list(self.io_index_map.values())]))
 
         # process the current state of firing neurons and non-firing neurons to get state changes
         activated_state_update = self.genome.activation_transform(previous_neurons[activated, Data.STATE.value])
@@ -308,7 +314,19 @@ class Specimen:
     def _deallocate_neurons(self, indices: Tensor):
         indices = set(indices.tolist())
         self.living_neuron_indices = list(filter(lambda i: i not in indices, self.living_neuron_indices))
+        for i in indices:
+            self.io_index_map.pop(i)
         self.dead_neurons_indices.extend(indices)
+
+    def stimulate_input_neurons(self, stimulus_map: Dict[int, float]):
+        indices = []
+        stimuli = []
+        for io_index, stimulus_value in stimulus_map.items():
+            if io_index not in self.io_index_map:
+                continue
+            indices.append(self.io_index_map[io_index])
+            stimuli.append(stimulus_value)
+        self.neurons[indices, Data.ACTIVATION_PROGRESS.value] += torch.tensor(stimuli, device=self.device)
 
 
 class StepLog:
@@ -319,3 +337,4 @@ class StepLog:
         self.neuron_positions = None
         self.connectivity = None
         self.activations = None
+        self.io_activations: Dict[int, bool] = {}

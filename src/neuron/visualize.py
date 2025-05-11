@@ -28,7 +28,8 @@ class Plotter:
         connection_colors: np.ndarray
     ):
         point_cloud_mesh = pv.PolyData(coordinates)
-        point_cloud_mesh['neuron_colors'] = point_colors
+        point_cloud_mesh.point_data['neuron_colors'] = point_colors
+        point_cloud_mesh.active_scalars_name = 'neuron_colors'
         lines_mesh = pv.PolyData(coordinates, lines=_line_segment_indices(coordinates.shape[0]))
         lines_mesh['line_colors'] = connection_colors
         if self.points_actor is None:
@@ -39,7 +40,8 @@ class Plotter:
                 point_size=10,
                 scalars='neuron_colors',
                 name='dynamic_points',
-                show_scalar_bar=False
+                show_scalar_bar=False,
+                rgb=True
             )
             self.lines_actor = self.plotter.add_mesh(
                 lines_mesh,
@@ -50,6 +52,8 @@ class Plotter:
             )
         else:
             self.points_actor.mapper.dataset = point_cloud_mesh
+            self.points_actor.mapper.scalar_visibility = True
+            self.points_actor.mapper.SetScalarModeToUsePointData()
             self.lines_actor.mapper.dataset = lines_mesh
 
         self.plotter.render()
@@ -85,6 +89,7 @@ def main():
     plotter = Plotter()
 
     def step():
+        specimen.stimulate_input_neurons({0: 0.2, 1: 0.1})
         specimen.step()
         # neurons = specimen.neurons[specimen.living_neuron_indices]
         coordinates = specimen.log.neuron_positions.detach().cpu().numpy() / 10
@@ -92,7 +97,7 @@ def main():
         neuron_color = np.zeros((coordinates.shape[0], 3))
         neuron_color[:] = np.array([0.1, 0.1, 1.0])
         # print(activations.shape, neuron_color.shape)
-        neuron_color[activations] = np.array([0.1, 1.0, 0.1])
+        neuron_color[activations] = np.array([1.0, 1.0, 0.1])
 
         activations_matrix = np.zeros((coordinates.shape[0], coordinates.shape[0]), dtype=np.bool)
         activations_matrix[activations] = True
@@ -108,7 +113,7 @@ def main():
 
         plotter.set_state(
             coordinates,
-            (np.random.rand(coordinates.shape[0], 3) * 255).astype(np.uint8),
+            neuron_color,
             connection_color
         )
 
