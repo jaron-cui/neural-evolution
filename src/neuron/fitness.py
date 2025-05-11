@@ -64,10 +64,11 @@ class NeuronSurvivalCriteria(Criteria):
 
 
 class SignalMatchingCriteria(Criteria):
-    def __init__(self, pattern: List[int], output_neuron_index: int):
+    def __init__(self, pattern: List[int], output_neuron_index: int, pulse_std: float):
         super().__init__()
         self.pattern = pattern
         self.output_neuron_index = output_neuron_index
+        self.pulse_std = pulse_std
         self.timestep = 0
         self.recorded_pattern = []
 
@@ -84,10 +85,9 @@ class SignalMatchingCriteria(Criteria):
         target = torch.tensor([frame - target_offset for frame in self.pattern])
         recorded = torch.tensor([frame - recorded_offset for frame in self.recorded_pattern])
 
-        std = 3
-        normal = dist.Normal(target, std)
-        peak_probability = dist.Normal(0, std).log_prob(torch.zeros(1)).exp().item()
-        max_probabilities = normal.log_prob(recorded.unsqueeze(0).repeat((target.size(0), 1)).T).max(dim=0)
+        normal = dist.Normal(target, self.pulse_std)
+        peak_probability = dist.Normal(0, self.pulse_std).log_prob(torch.zeros(1)).exp().item()
+        max_probabilities, _ = normal.log_prob(recorded.unsqueeze(0).repeat((target.size(0), 1)).T).max(dim=0)
         normalized_max_probabilities = max_probabilities.exp() / peak_probability
 
         score = (normalized_max_probabilities - 0.2).sum()
