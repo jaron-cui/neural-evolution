@@ -50,23 +50,27 @@ def simulate_generation(
 def simulate_run(specimen: Specimen, iterations: int) -> float:
     cancer_threshold = 200
     optimal_neuron_count = 100
+    iteration_death_penalty = 10
     pattern = [150, 170, 180, 185, 200, 250, 260, 265, 275, 290, 300, 310, 390, 450, 460, 480, 500, 550, 555, 560, 565, 575, 590]
 
     criteria = [
         TargetNeuronCountCriteria(optimal_neuron_count),
         NeuronSurvivalCriteria(optimal_neuron_count),
-        SignalMatchingCriteria(pattern, 1),
-        TargetActivationRateCriteria(10.0)
+        SignalMatchingCriteria(pattern, 1, 5),
+        # TargetActivationRateCriteria(0.1)
     ]
+    auxiliary_score = 0
     for i in range(iterations):
         if i in pattern:
             specimen.stimulate_input_neurons({0: 1.0})
         specimen.step()
         for criterion in criteria:
             criterion.accumulate(specimen)
-        if specimen.log.neuron_count > cancer_threshold or specimen.log.neuron_count == 0:
+        if specimen.log.neuron_count > cancer_threshold or specimen.log.neuron_count == 0 or 0 not in specimen.io_index_map or 1 not in specimen.io_index_map.values():
+            death_penalty = iteration_death_penalty * (iterations - i)
+            auxiliary_score -= death_penalty
             break
-    return sum([criterion.calculate_fitness_score() for criterion in criteria])
+    return sum([criterion.calculate_fitness_score() for criterion in criteria]) + auxiliary_score
 
 
 def reproduce(genomes: List[Genome], target_count: int) -> List[Genome]:
@@ -100,6 +104,7 @@ def train(
     else:
         training_record, survivors = TrainingRecord.resume_from(resume_training_run_from)
         population = reproduce(survivors, generation_size)
+        logging.info('----------------------------------------    /    ----------------------------------------')
         logging.info(f'Resuming evolution from `{resume_training_run_from}` for {generations} additional generations.')
 
     torch.set_grad_enabled(False)
@@ -117,7 +122,7 @@ def train(
 
 # @app.local_entrypoint()
 def main():
-    train(60, 100, 600, resume_training_run_from='checkpoints/2025-05-11/01-41-17')
+    train(10, 100, 600, resume_training_run_from='checkpoints/2025-05-11/11-57-23')
     # training_record = TrainingRecord('checkpoints')
     # save_every = 1
     #
