@@ -1,5 +1,5 @@
 import random
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 import pyvista as pv
@@ -75,8 +75,31 @@ def create_specimen(genome: Genome) -> Specimen:
     return specimen
 
 
+def visualization_information(specimen: Specimen) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    coordinates = specimen.log.neuron_positions.detach().cpu().numpy() / 10
+    activations = specimen.log.activations.detach().cpu().numpy()
+    neuron_color = np.zeros((coordinates.shape[0], 3))
+    neuron_color[:] = np.array([0.1, 0.1, 1.0])
+
+    neuron_color[activations] = np.array([1.0, 1.0, 0.1])
+
+    activations_matrix = np.zeros((coordinates.shape[0], coordinates.shape[0]), dtype=np.bool)
+    activations_matrix[activations] = True
+
+    connectivity = specimen.log.connectivity.detach().cpu().numpy().flatten()
+    connection_opacity = np.clip(connectivity.flatten() * 0.1, 0.0, 1.0)
+    connection_color = np.zeros((connectivity.shape[0], 4))
+    connection_color[:] = np.array([0.6, 0.6, 0.85, 0.0])
+
+    connection_color[:, -1] = connection_opacity
+    connection_color[activations_matrix.T.flatten()] = np.array([1.0, 1.0, 0.1, 1.0])
+    # cull bottom 90% connections
+    connection_color[np.argsort(connectivity)[:-connection_opacity.shape[0] // 20], -1] = 0
+    return coordinates, neuron_color, connection_color
+
+
 def main():
-    genome = torch.load('../../checkpoints/2025-05-11/11-57-23/generation_11_survivors.pt', weights_only=False)[0]
+    genome = torch.load('../../checkpoints/2025-05-11/11-57-23/generation_58_survivors.pt', weights_only=False)[0]
     # genome = init_genome()
     # print(genome.activation_decay, torch.nn.functional.sigmoid(torch.Tensor([genome.activation_decay])).item())
     specimen = create_specimen(genome)
@@ -87,31 +110,7 @@ def main():
         if random.random() < 0.01:
             specimen.stimulate_input_neurons({0: 1.0})
         specimen.step()
-
-        coordinates = specimen.log.neuron_positions.detach().cpu().numpy() / 10
-        activations = specimen.log.activations.detach().cpu().numpy()
-        neuron_color = np.zeros((coordinates.shape[0], 3))
-        neuron_color[:] = np.array([0.1, 0.1, 1.0])
-
-        neuron_color[activations] = np.array([1.0, 1.0, 0.1])
-
-        activations_matrix = np.zeros((coordinates.shape[0], coordinates.shape[0]), dtype=np.bool)
-        activations_matrix[activations] = True
-
-        connectivity = specimen.log.connectivity.detach().cpu().numpy().flatten()
-        connection_opacity = np.clip(connectivity.flatten() * 0.1, 0.0, 1.0)
-        connection_color = np.zeros((connectivity.shape[0], 4))
-        connection_color[:] = np.array([0.6, 0.6, 0.85, 0.0])
-
-        connection_color[:, -1] = connection_opacity
-        connection_color[activations_matrix.T.flatten()] = np.array([1.0, 1.0, 0.1, 1.0])
-        connection_color[np.argsort(connectivity)[:-connection_opacity.shape[0] // 20], -1] = 0  # cull bottom 90% connections
-
-        plotter.set_state(
-            coordinates,
-            neuron_color,
-            connection_color
-        )
+        plotter.set_state(*visualization_information(specimen))
 
     plotter.plotter.add_key_event('space', step)
 
